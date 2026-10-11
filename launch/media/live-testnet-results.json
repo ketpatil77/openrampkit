@@ -1,5 +1,5 @@
 {
-  "url": "https://openrampkit-getformo.vercel.app/playground/",
+  "url": "https://openrampkit.vercel.app/playground/",
   "wallet": "0x13B95aeC9277B3aD809737a9A1435bb2e8e77D89",
   "before": {
     "eth": "149784885501564996",

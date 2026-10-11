@@ -15,7 +15,7 @@ import { createPublicClient, createWalletClient, http } from 'viem'
 import { nonceManager, privateKeyToAccount } from 'viem/accounts'
 import { arbitrumSepolia } from 'viem/chains'
 
-const URL_ = process.env.PLAYGROUND_URL ?? 'https://openrampkit-getformo.vercel.app/playground/'
+const URL_ = process.env.PLAYGROUND_URL ?? 'https://openrampkit.vercel.app/playground/'
 const RPC = 'https://sepolia-rollup.arbitrum.io/rpc'
 const SETTLEMENT = '0x12196D55b9009145c9CBAe7e256f3d32F9e27Af5'
 const TEST_TOKEN = '0x9A38C55160186C3E1e770e193fA96997e60ed425'

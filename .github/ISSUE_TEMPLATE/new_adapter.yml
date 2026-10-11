@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Read [Writing an adapter](https://openrampkit-getformo.vercel.app/adapters/writing-an-adapter) first. Anyone can write an adapter and test it with the conformance kit.
+        Read [Writing an adapter](https://openrampkit.vercel.app/adapters/writing-an-adapter) first. Anyone can write an adapter and test it with the conformance kit.
   - type: input
     id: provider
     attributes:

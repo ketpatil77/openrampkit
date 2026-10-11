@@ -1,7 +1,7 @@
 # Live testnet check: playground "Testnet (real wallet)" on Arbitrum Sepolia
 
 - Date: 2026-10-05
-- Site: https://openrampkit-getformo.vercel.app/playground/ (bundle `index-CZMobVJV.js`, includes "Testnet (real wallet)")
+- Site: https://openrampkit.vercel.app/playground/ (bundle `index-CZMobVJV.js`, includes "Testnet (real wallet)")
 - Chain: Arbitrum Sepolia (421614), RPC `https://sepolia-rollup.arbitrum.io/rpc`
 - Settlement contract: `0xBF66696115128B8f9f794780061348b4213A7132`
 - Wallet: `0x13B95aeC9277B3aD809737a9A1435bb2e8e77D89` (test deployer)

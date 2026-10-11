@@ -28,7 +28,7 @@ Timed to `demo-final.mp4` (1280x800, 2:30, H.264 and AAC). The voice is ElevenLa
 | 1:54 to 2:01 | Code panel | For developers, it is a few lines. Create a session on your server. Open the widget on your page. |
 | 2:01 to 2:07 | Arbitrum Sepolia explorer, transaction | Ten provider adapters, from card onramps to local rails. Self-hosted, next to your own backend. |
 | 2:07 to 2:19 | Logs tab, Settled event from OpenRampSettlement | Settlement is onchain. OpenRampSettlement is live on Arbitrum Sepolia and Robinhood Chain testnet. One transaction emits a Settled event that your app can verify. |
-| 2:19 to 2:30 | End card: github.com/yosriady/openrampkit, openrampkit-getformo.vercel.app | AI agents can use it too. Through MCP, an agent creates a pay link, and a person pays. OpenRampKit. MIT licensed. Get your users onchain. |
+| 2:19 to 2:30 | End card: github.com/yosriady/openrampkit, openrampkit.vercel.app | AI agents can use it too. Through MCP, an agent creates a pay link, and a person pays. OpenRampKit. MIT licensed. Get your users onchain. |
 
 ## Facts to keep correct
 
@@ -37,4 +37,4 @@ Timed to `demo-final.mp4` (1280x800, 2:30, H.264 and AAC). The voice is ElevenLa
 - Ten provider adapters: Coinbase, Meld, MoonPay, Onramper, Peer, Relay, Stripe, Swapped, Transak, Xendit. The four mock providers in the playground (Mock Onramp A, Mock Onramp B, Mock Local Rails, Mock Card Onramp) are not counted.
 - Test cards in the playground: 4242 4242 4242 4242 pays, 4000 0000 0000 0002 declines.
 - License: MIT.
-- Links: https://github.com/yosriady/openrampkit and https://openrampkit-getformo.vercel.app (playground at `/playground/`).
+- Links: https://github.com/yosriady/openrampkit and https://openrampkit.vercel.app (playground at `/playground/`).

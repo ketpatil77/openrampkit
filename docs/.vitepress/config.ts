@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 
-// Public path of the site. Vercel (https://openrampkit-getformo.vercel.app), Cloudflare Pages and a custom domain
+// Public path of the site. Vercel (https://openrampkit.vercel.app), Cloudflare Pages and a custom domain
 // serve it at the root: leave DOCS_BASE unset. A GitHub Pages project site needs DOCS_BASE=/openrampkit/
 // (see docs/deploy/docs-site.md).
 const base = (process.env.DOCS_BASE ?? '/').replace(/\/?$/, '/')

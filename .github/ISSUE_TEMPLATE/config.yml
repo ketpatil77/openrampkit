@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/yosriady/openrampkit/security/advisories/new
     about: Do not open a public issue for a vulnerability. Use private vulnerability reporting. See SECURITY.md.
   - name: Docs
-    url: https://openrampkit-getformo.vercel.app/
+    url: https://openrampkit.vercel.app/
     about: Guides, API reference and the live demo.

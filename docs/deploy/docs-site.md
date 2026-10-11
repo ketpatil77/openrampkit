@@ -17,7 +17,7 @@ The `DOCS_BASE` environment variable sets the public path of the site. The docs 
 
 | Host | `DOCS_BASE` |
 |---|---|
-| Vercel (the public site, `https://openrampkit-getformo.vercel.app`) | Do not set it (the default is `/`) |
+| Vercel (the public site, `https://openrampkit.vercel.app`) | Do not set it (the default is `/`) |
 | Custom domain, or Cloudflare Pages | Do not set it |
 | GitHub Pages project site (`https://yosriady.github.io/openrampkit/`) | `/openrampkit/` |
 
@@ -27,7 +27,7 @@ DOCS_BASE=/openrampkit/ pnpm site:build
 
 ## Vercel
 
-The public site at [openrampkit-getformo.vercel.app](https://openrampkit-getformo.vercel.app) runs on Vercel.
+The public site at [openrampkit.vercel.app](https://openrampkit.vercel.app) runs on Vercel.
 
 1. Import the repository as a new Vercel project.
 2. Set **Framework Preset** to **Other**.

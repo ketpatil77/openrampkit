@@ -1,6 +1,6 @@
 # Market research: deposit and ramp landscape (2026-09-29)
 
-Sources are linked inline. "Not verified" marks claims we could not confirm. Local code snapshots (not for publishing): `~/funkit-reference`, `~/d0fi-reference`, `~/unifold-reference`. Diagrams: https://claude.ai/artifact/YVe96tnDr1LhAyonwzdteV
+Sources are linked inline. "Not verified" marks claims we could not confirm. Local code snapshots (not for publishing): `~/funkit-reference`, `~/d0fi-reference`, `~/unifold-reference`.
 
 ## Industry map
 

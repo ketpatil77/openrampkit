@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 LEAD="${LEAD:-0.25}"     # seconds between a beat start and its voice line
 OFFSET="${OFFSET:-0}"    # video time minus mark time (measured near 0 for Playwright video)
-LEN=$(node -e 'const m=require("./.vo/marks.json"); console.log(Math.min(m.end, 150).toFixed(2))')
+LEN=$(node -e 'const m=require("./.vo/marks.json"); console.log(Math.min(m.end, 175).toFixed(2))')
 
 # Place each clip at its beat with adelay. Speed up a clip (atempo up to 1.15) only if it overruns the next beat.
 FILTER=$(node -e '

@@ -81,77 +81,66 @@ const LOGO = (s) => `<svg viewBox="0 0 64 64" width="${s}" height="${s}"><rect w
 const card = (inner) => `<body style="margin:0;background:#10163A;color:#fff;font-family:Inter,-apple-system,'Helvetica Neue',Arial,sans-serif;height:100vh;display:grid;place-items:center;text-align:center"><div>${inner}</div></body>`
 const WORDMARK = `<div style="font-size:76px;letter-spacing:-2px;margin-top:24px"><b>OpenRamp</b>Kit</div>`
 
-// 1. Title card
-await beat('01-title', undefined, async () => {
-  await p.setContent(card(`${LOGO(120)}${WORDMARK}
-<div style="font-size:34px;font-weight:600;margin-top:18px">Unified deposits and withdrawals for any app</div>
-<div style="font-size:24px;color:#2BE3A0;margin-top:14px">The RainbowKit for onramps and deposits</div>`))
-  await wait(300)
-  await shot('title')
-})
-
 const m = p.locator('openramp-modal')
 const amount = () => m.getByRole('textbox', { name: /Amount/ })
+const quotes = () => m.getByRole('radiogroup', { name: 'Quotes' }).getByRole('radio')
 
-// 2. Playground
-await beat('02-intro', 'Playground: the OpenRampKit server runs in the browser, with four mock providers', async () => {
-  await p.goto(BASE)
+// 1. Intro: the playground
+await beat('01-intro', 'Playground: the OpenRampKit server runs in the browser, with mock providers', async () => {
+  await p.goto(`${BASE}?country=SG`)
   await m.getByRole('tab', { name: 'Use Cash' }).waitFor()
-  await wait(4000)
+  await wait(3500)
   await moveTo(p.getByTestId('demo-banner'))
-  await wait(3000)
+  await wait(2500)
   await moveTo(p.locator('#country'))
 })
 
-// 3. Vietnam: VietQR
-await beat('03-vn', 'Vietnam: local cash methods', async () => {
+// 2. Singapore: PayNow
+await beat('02-sg', 'Singapore: local cash methods. PayNow, 200 dollars.', async () => {
   await click(m.getByRole('tab', { name: 'Use Cash' }))
   await wait(1500)
-  await shot('vn-methods')
-  await click(m.getByRole('button', { name: /VietQR/ }))
-  await caption('Pay with VietQR: 500,000 VND')
-  await typeSlow(amount(), '500000')
-  await wait(500)
+  await shot('sg-methods')
+  await click(m.getByRole('button', { name: /PayNow/ }))
+  await typeSlow(amount(), '200')
+  await wait(400)
 })
 
-// 4. Quotes
-await beat('04-quotes', 'Three mock providers quote the same route. Best price first.', async () => {
+// 3. Quotes
+await beat('03-quotes', 'Providers quote the same route. Best price first.', async () => {
   await click(m.getByRole('button', { name: 'Continue' }))
-  const quotes = m.getByRole('radiogroup', { name: 'Quotes' }).getByRole('radio')
-  await quotes.nth(1).waitFor()
+  await quotes().nth(1).waitFor()
   await wait(1200)
-  await moveTo(quotes.first())
+  await moveTo(quotes().first())
   await wait(1200)
-  await shot('vn-quotes')
-  await moveTo(quotes.nth(2))
-  await wait(1000)
+  await shot('sg-quotes')
+  await moveTo(quotes().nth(Math.min(2, (await quotes().count()) - 1)))
+  await wait(800)
 })
 
-// 5. VietQR code and simulated bank payment
-await beat('05-qr', 'Scan with any Vietnamese banking app', async () => {
+// 4. QR and simulated bank payment
+await beat('04-qr', 'Scan with any banking app', async () => {
   await click(m.getByRole('button', { name: 'Confirm' }))
   const sim = m.getByRole('button', { name: /Simulate payment/ })
   await sim.waitFor()
-  await wait(2800)
-  await shot('vn-vietqr')
+  await wait(2500)
+  await shot('sg-qr')
   await caption('Test mode: simulate the bank payment')
   await click(sim)
 })
 
-// 6. Deposit complete, events and signed webhook
-await beat('06-webhook', 'Widget events on your page. Signed webhooks to your backend.', async () => {
+// 5. Deposit complete, events and signed webhook
+await beat('05-webhook', 'Widget events on your page. Signed webhooks to your backend.', async () => {
   await m.getByRole('heading', { name: 'Deposit complete' }).waitFor({ timeout: 30000 })
-  await wait(1200)
-  await shot('vn-complete')
+  await wait(1000)
+  await shot('sg-complete')
   await smoothScroll(420)
-  const ok = p.getByTestId('webhooks').getByText('signature ok').first()
-  await moveTo(ok)
-  await wait(1500)
+  await moveTo(p.getByTestId('webhooks').getByText('signature ok').first())
+  await wait(1200)
   await shot('events-webhooks')
 })
 
-// 7. United States: card, quotes
-await beat('07-us', 'United States: card, Apple Pay and Google Pay', async () => {
+// 6. United States
+await beat('06-us', 'United States: card, Apple Pay and Google Pay', async () => {
   await smoothScroll(0)
   await select('country', 'US')
   await m.getByRole('tab', { name: 'Use Cash' }).waitFor()
@@ -162,100 +151,104 @@ await beat('07-us', 'United States: card, Apple Pay and Google Pay', async () =>
   await click(m.getByRole('button', { name: /^Card/ }))
   await typeSlow(amount(), '100')
   await click(m.getByRole('button', { name: 'Continue' }))
-  await m.getByRole('radiogroup', { name: 'Quotes' }).getByRole('radio').nth(1).waitFor()
-  await wait(1200)
+  await quotes().nth(1).waitFor()
+  await wait(1000)
 })
 
-// 8. Test card in the widget
-await beat('08-card', 'Test card 4242 4242 4242 4242, right in the widget', async () => {
+// 7. Test card
+await beat('07-card', 'Test card 4242 4242 4242 4242, right in the widget', async () => {
   await click(m.getByRole('button', { name: 'Confirm' }))
   await typeSlow(m.getByRole('textbox', { name: /Card number/ }), '4242 4242 4242 4242', 40)
   await typeSlow(m.getByRole('textbox', { name: /Expiry/ }), '12/30', 80)
   await typeSlow(m.getByRole('textbox', { name: 'CVC' }), '123', 80)
-  await wait(400)
+  await wait(300)
   await shot('us-card')
   await click(m.getByRole('button', { name: 'Pay (test mode)' }))
   await m.getByRole('heading', { name: 'Deposit complete' }).waitFor({ timeout: 30000 })
   await caption('Deposit complete')
-  await wait(1200)
 })
 
-// 9. From an exchange
-await beat('09-exchange', 'Use Crypto: from an exchange', async () => {
+// 8. From an exchange
+await beat('08-exchange', 'From an exchange: a deposit address, with the network and the token', async () => {
   await p.goto(`${BASE}?country=US`) // a new session
   await m.getByRole('tab', { name: 'Use Crypto' }).waitFor()
   await wait(500)
   await click(m.getByRole('tab', { name: 'Use Crypto' }))
-  await wait(800)
+  await wait(700)
   await click(m.getByRole('button', { name: /From an exchange/ }))
   await m.getByRole('combobox', { name: 'Network' }).waitFor()
-  await wait(1000)
+  await wait(900)
   await click(m.getByRole('button', { name: 'Continue' }))
-  await caption('A deposit address, with the network and the token')
   await m.getByText(/Send USDC on \w+ to this address/).waitFor()
-  await wait(3000)
+  await wait(2500)
   await shot('exchange-address')
   await click(m.getByRole('button', { name: /Simulate deposit/ }))
   await m.getByRole('heading', { name: 'Deposit complete' }).waitFor({ timeout: 30000 })
-  await smoothScroll(0)
 })
 
-// 10. Customization: payment sources, theme, corners, font
-await beat('10-custom', 'Choose payment sources. Match your brand.', async () => {
+// 9. Customization
+await beat('09-custom', 'Choose payment sources. Match your brand.', async () => {
   await check(/^Card/, false)
-  await wait(1500)
+  await wait(1200)
   const cashTab = m.getByRole('tab', { name: 'Use Cash' })
   if (await cashTab.count()) await click(cashTab)
-  await wait(1200)
+  await wait(1000)
   await select('theme', 'dark')
-  await wait(500)
   await select('radius', 'small')
-  await wait(500)
   await select('font', 'rounded')
-  await wait(600)
+  await wait(500)
   await p.mouse.move(490, 300, { steps: 20 })
   await shot('custom-dark')
 })
 
-// 11. Withdraw to a bank account: quote
-await beat('11-withdraw', 'Withdraw: USDC to a bank account in Vietnam', async () => {
+// 10. Withdraw to GCash: quote
+await beat('10-withdraw', 'Withdraw: USDC to GCash in the Philippines', async () => {
   await check(/^Card/, true)
-  await select('country', 'VN')
+  await select('country', 'PH')
   await select('direction', 'withdraw')
   await m.getByRole('tab', { name: 'To cash' }).waitFor()
   await click(m.getByRole('tab', { name: 'To cash' }))
   await wait(700)
-  await click(m.getByRole('button', { name: /Bank transfer/ }))
+  await click(m.getByRole('button', { name: /GCash/ }))
   await typeSlow(amount(), '25')
   await click(m.getByRole('button', { name: 'Continue' }))
-  await caption('Payout quotes in VND')
-  await m.getByRole('radiogroup', { name: 'Quotes' }).getByRole('radio').first().waitFor()
-  await wait(1500)
+  await caption('Payout quotes in PHP')
+  await quotes().first().waitFor()
+  await wait(1200)
   await shot('withdraw-quote')
 })
 
-// 12. Payout details, wallet approval, done
-await beat('12-withdraw-done', 'Bank details, then one wallet approval', async () => {
+// 11. Details, wallet approval, done
+await beat('11-withdraw-done', 'Payout details, then one wallet approval', async () => {
   await click(m.getByRole('button', { name: 'Confirm' }))
-  const ins = m.locator('input')
-  await ins.first().waitFor()
-  await typeSlow(ins.nth(0), 'Nguyen Van An', 45)
-  await typeSlow(ins.nth(1), 'Vietcombank', 45)
-  await typeSlow(ins.nth(2), '0123456789', 45)
+  await typeSlow(m.getByRole('textbox', { name: 'Account holder name' }), 'Maria Santos', 45)
+  await typeSlow(m.getByRole('textbox', { name: 'GCash phone number' }), '09171234567', 45)
   await click(m.getByRole('button', { name: 'Continue' }))
   await click(m.getByRole('button', { name: 'Confirm in wallet' }))
   await m.getByRole('heading', { name: 'Withdrawal complete' }).waitFor({ timeout: 30000 })
   await caption('Withdrawal complete')
-  await wait(1000)
+  await wait(800)
   await shot('withdraw-complete')
+})
+
+// 12. Admin dashboard
+await beat('12-admin', 'Ops dashboard: deposits, withdrawals, stuck payments, webhook replays', async () => {
+  await click(p.locator('#admin-open'))
+  await p.locator('#admin-frame').waitFor()
+  await wait(3500)
+  await p.mouse.move(640, 420, { steps: 25 })
+  await wait(2500)
+  await shot('admin')
+  await p.mouse.move(640, 600, { steps: 25 })
+  await wait(1500)
+  await click(p.locator('#admin-close'))
 })
 
 // 13. Code
 await beat('13-code', 'A few lines: create a session on your server, open the widget on your page', async () => {
   await select('direction', 'deposit')
   await wait(400)
-  const code = p.locator('#code')
-  await moveTo(code)
+  await moveTo(p.locator('#code'))
   await p.mouse.move(900, 180, { steps: 20 })
   await wait(1500)
   await p.mouse.move(900, 420, { steps: 30 })
@@ -263,54 +256,65 @@ await beat('13-code', 'A few lines: create a session on your server, open the wi
   await shot('code')
 })
 
-// 14 and 15. Explorer: the Settled event on Arbitrum Sepolia
-const TX = 'https://arbitrum-sepolia.blockscout.com/tx/0x7e6a3848d92ea11ae833d05b9584f3f83481b9bb4f3ed849843b2ffffeea87ac'
-let explorerOk = true
-await beat('14-explorer', '10 provider adapters. Self-hosted, next to your backend.', async () => {
-  await caption('')
-  try {
-    await p.goto(TX, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    await caption('10 provider adapters. Self-hosted, next to your backend.')
-    await wait(2500)
-  } catch (e) {
-    explorerOk = false
-    console.log('explorer failed:', e.message)
+// 14. Many countries and methods: 13 adapters
+await beat('14-explorer', '13 provider adapters. Self-hosted, next to your backend.', async () => {
+  for (const c of ['TH', 'ID', 'PH', 'SG']) {
+    await select('country', c)
+    const cash = m.getByRole('tab', { name: 'Use Cash' })
+    if (await cash.count()) await click(cash)
+    await wait(1100)
   }
 })
-await beat('15-settled', 'Live on Arbitrum Sepolia: OpenRampSettlement emits Settled', async () => {
+
+// 15. Settlement onchain on the prize-track chains
+const PAGES = [
+  { url: 'https://explorer.solana.com/tx/4cAv4h7Pv8FGBx55yidQwJcww5uqF54usUy7juR8hnViRm4UBbAZ7NEdTuZuwWJXtyBQ9eLvozWjRPi7MYnBxiKY?cluster=devnet', fb: 'frame-solana-fallback.png', cap: 'Solana devnet: SPL transfer verified onchain', ms: 4000 },
+  { url: 'https://explore.testnet.tempo.xyz/tx/0x40a152bb98f2fd9e99d8592381903279eba20a344dc737cc2d7938b728aa44d3', fb: 'frame-tempo-fallback.png', cap: 'Tempo testnet: OpenRampSettlement', ms: 4000 },
+  { url: 'https://arbitrum-sepolia.blockscout.com/tx/0xf370773565bd5340b17f1a00e969fdd15f84229d73be10346c7f0ab197aa4fdf?tab=logs', fb: 'frame-arbitrum-settled.png', cap: 'Arbitrum Sepolia: OpenRampSettlement emits Settled', ms: 5000, still: true },
+]
+const fails = []
+async function showPage({ url, fb, cap, ms, until, still }, i) {
+  const t = now()
+  let ok = true
   try {
-    if (!explorerOk) throw new Error('explorer page did not load')
-    if (!/tab=logs/.test(p.url())) {
-      const logsTab = p.getByText('Logs', { exact: true }).first()
-      try { await moveTo(logsTab); await logsTab.click(); await wait(1200) } catch {}
+    if (still) throw new Error('still image (slow explorer)')
+    await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await wait(3500)
+    const body = (await p.locator('body').innerText()).slice(0, 4000)
+    if (body.length < 200) throw new Error('page looks empty')
+    if (until) {
+      await p.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {})
+      await wait(5000)
+      const hit = p.getByText(until).first()
+      await hit.waitFor({ timeout: 25000 })
+      const y = await hit.evaluate((el) => el.getBoundingClientRect().top + window.scrollY - 180)
+      for (let k = 1; k <= 6; k++) { await p.evaluate((v) => window.scrollTo({ top: v, behavior: 'smooth' }), (y * k) / 6); await wait(300) }
+      await moveTo(hit)
+      await wait(2500)
     }
-    if (!/tab=logs/.test(p.url())) await p.goto(p.url().split('?')[0] + '?tab=logs', { waitUntil: 'domcontentloaded' })
-    await caption('Live on Arbitrum Sepolia: OpenRampSettlement emits Settled')
-    const settled = p.getByText(/^Settled\(/).first()
-    await settled.waitFor({ timeout: 20000 })
-    await wait(600)
-    const y = await settled.evaluate((el) => el.getBoundingClientRect().top + window.scrollY - 180)
-    for (let i = 1; i <= 6; i++) { await p.evaluate((v) => window.scrollTo({ top: v, behavior: 'smooth' }), (y * i) / 6); await wait(350) }
-    await moveTo(settled)
-    await wait(1500)
-    await shot('explorer-settled')
   } catch (e) {
-    explorerOk = false
-    console.log('explorer failed:', e.message)
-    // Fallback: the last good screenshot of the same transaction.
-    const img = fs.readFileSync(`${OUT}/frame-explorer-fallback.png`).toString('base64')
+    ok = false
+    if (!still) fails.push(url)
+    console.log('explorer fallback:', url, e.message)
+    const img = fs.readFileSync(`${OUT}/${fb}`).toString('base64')
     await p.setContent(`<body style="margin:0;background:#fff"><img src="data:image/png;base64,${img}" style="width:100vw;height:100vh;object-fit:contain"></body>`)
-    await caption('Live on Arbitrum Sepolia: OpenRampSettlement emits Settled')
   }
+  await caption(cap)
+  if (ok) await shot(`explorer-${i}`)
+  const rest = ms - (now() - t)
+  if (rest > 0) await wait(rest)
+}
+await beat('15-settled', undefined, async () => {
+  for (let i = 0; i < PAGES.length; i++) await showPage(PAGES[i], i)
 })
 
 // 16. End card
 await beat('16-end', undefined, async () => {
   await p.setContent(card(`${LOGO(100)}${WORDMARK}
 <div style="font-size:30px;font-weight:600;margin-top:16px">Open-source, unified deposit infrastructure for crypto apps</div>
-<div style="font-size:22px;margin-top:14px;opacity:.85">10 provider adapters · Pathway planner · Self-hosted · AI agents via MCP · MIT</div>
+<div style="font-size:22px;margin-top:14px;opacity:.85">13 provider adapters · Solana · Tempo · EVM · Self-hosted · AI agents via MCP · MIT</div>
 <div style="font-size:26px;color:#2BE3A0;font-weight:600;margin-top:30px">github.com/yosriady/openrampkit</div>
-<div style="font-size:24px;color:#2BE3A0;margin-top:8px">openrampkit-getformo.vercel.app</div>`))
+<div style="font-size:24px;color:#2BE3A0;margin-top:8px">openrampkit.vercel.app</div>`))
   await wait(300)
   await shot('end')
 })
@@ -321,6 +325,6 @@ const video = p.video()
 await ctx.close()
 fs.renameSync(await video.path(), `${OUT}/demo-raw.webm`)
 fs.rmSync(vdir, { recursive: true, force: true })
-fs.writeFileSync(`${VO}/marks.json`, JSON.stringify({ ...marks, explorerOk }, null, 2))
+fs.writeFileSync(`${VO}/marks.json`, JSON.stringify({ ...marks, explorerOk: fails.length === 0 }, null, 2))
 await browser.close()
-console.log('saved', `${OUT}/demo-raw.webm`, 'length', marks.end.toFixed(1), 's', 'explorerOk', explorerOk)
+console.log('saved', `${OUT}/demo-raw.webm`, 'length', marks.end.toFixed(1), 's', 'explorer fails', fails.length)

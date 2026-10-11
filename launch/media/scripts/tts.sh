@@ -6,15 +6,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
-VOICE_ID="${VOICE_ID:-EXAVITQu4vr4xnSDxMaL}" # Sarah (ElevenLabs premade voice)
-MODEL_ID="${MODEL_ID:-eleven_multilingual_v2}"
+VOICE_ID="${VOICE_ID:-UgBBYS2sOqTuMpoF3BR0}" # Mark - Natural Conversations
+MODEL_ID="${MODEL_ID:-eleven_v4}"
 mkdir -p .vo
 FORCE="${1:-}"
 node -e 'for (const l of require("./scripts/demo-lines.json")) console.log(l.id + "\t" + l.text)' |
 while IFS=$'\t' read -r id text; do
   out=".vo/$id.mp3"
   if [[ -s "$out" && "$FORCE" != "--force" ]]; then continue; fi
-  body=$(node -e 'console.log(JSON.stringify({ text: process.argv[1], model_id: process.argv[2], voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.15, use_speaker_boost: true } }))' "$text" "$MODEL_ID")
+  body=$(node -e 'console.log(JSON.stringify({ text: process.argv[1], model_id: process.argv[2], voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0, use_speaker_boost: true } }))' "$text" "$MODEL_ID")
   code=$(curl -s -o "$out" -w '%{http_code}' -X POST \
     "https://api.elevenlabs.io/v1/text-to-speech/$VOICE_ID?output_format=mp3_44100_128" \
     -H "xi-api-key: $ELEVENLABS_API_KEY" -H 'Content-Type: application/json' -d "$body")

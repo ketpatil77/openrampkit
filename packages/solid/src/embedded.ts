@@ -2,7 +2,7 @@ import { createComponent, createEffect, on, onCleanup, onMount, untrack } from '
 import type { JSX } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import type { ClientEvent, PublicSession, WalletAdapter } from '@openrampkit/core'
-import type { DepositController } from '@openrampkit/client'
+import type { DepositController, FlowOptions } from '@openrampkit/client'
 import type { Messages, OpenRampModal } from '@openrampkit/web'
 import type { Appearance, Theme } from '@openrampkit/web/theme'
 import { applyView, onModalClose, startEmbedded } from './embed.js'
@@ -18,6 +18,10 @@ export type OpenRampEmbeddedProps = {
   messages?: Partial<Messages>
   /** BCP 47 locale. Defaults to the provider's `locale` */
   locale?: string
+  /** How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance */
+  flow?: FlowOptions
+  /** Close as soon as the payment completes, with no success screen */
+  autoClose?: boolean
   onEvent?: (e: ClientEvent) => void
   onComplete?: (session: PublicSession) => void
   /** Called when the user presses Close on a result or error screen */
@@ -58,6 +62,8 @@ export function OpenRampEmbedded(props: OpenRampEmbeddedProps): JSX.Element {
             },
             onComplete: (s) => props.onComplete?.(s),
             onController: (c) => props.onController?.(c),
+            ...(props.flow ? { flow: props.flow } : {}),
+            ...(props.autoClose ? { autoClose: true } : {}),
           })
         })
         onCleanup(stop)

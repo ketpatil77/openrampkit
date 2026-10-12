@@ -2,7 +2,7 @@
 // state for one session. UIs render `getSnapshot()` and call its actions. The session's direction
 // picks the flow: deposit (methods, amount, quotes) or withdraw (target, amount, quotes).
 
-import { CHAINS, USDC, accountFor, exchangeOptions, chainNamespace, cmp, createClientEvent, currencyForCountry, isAddressTransfer, isSafeLinkUrl, isTerminal, isWebUrl, openRampError } from '@openrampkit/core'
+import { CHAINS, USDC, accountFor, defaultSourceTokens, exchangeOptions, nativeDecimals, sourceTokenKey, chainNamespace, cmp, createClientEvent, currencyForCountry, isAddressTransfer, isSafeLinkUrl, isTerminal, isWebUrl, openRampError } from '@openrampkit/core'
 import type {
   Direction,
   MethodOption,
@@ -65,6 +65,8 @@ export type Snapshot = {
   sources?: SourceChain[]
   /** Deposit: the exchange the user picked in the "From an exchange" picker (an `ExchangeOption` id) */
   exchange?: string
+  /** Amount chips per currency code, from `FlowOptions.presets` */
+  presets?: Record<string, string[]>
   /** The provider page (IFRAME surface) said the user closed it. Cleared by `reopenSurface()` or a new step. */
   surfaceClosed: boolean
   /** Withdraw: the "To wallet" form */
@@ -73,9 +75,37 @@ export type Snapshot = {
   cashCurrency?: string
 }
 
+/**
+ * How the flow opens, set by the app per session. Every option is optional, and an option that does not
+ * fit the session (a method the plan does not have, a tab with no methods) is ignored.
+ */
+export type FlowOptions = {
+  /** The tab to show first. Deposit: `crypto` (wallet, transfer, exchanges) or `cash`. Withdraw: `crypto` (To wallet) or `cash` (To cash). */
+  initialTab?: Tab
+  /** Deposit: open this method at once, for example `qris`, `transfer` or `exchanges` (the exchange picker) */
+  initialMethod?: string
+  /** With `initialMethod`: hide the way back to the method list */
+  lockMethod?: boolean
+  /** Amount to fill in, for example `'50'` */
+  amount?: string
+  /** Amount chips per currency code (a fiat code, or a token symbol for a wallet deposit), for example `{ USD: ['20', '50', '100'] }`. At most 4 show. */
+  presets?: Record<string, string[]>
+  /** Deposit: the token the user pays with first (wallet and transfer). Without `token`: USDC on the chain, else the native token. */
+  defaultSource?: { chain: string; token?: string }
+  /** Withdraw: the chain and token to receive first on the "To wallet" tab */
+  defaultTarget?: { chain: string; token?: string }
+  /**
+   * Withdraw: the amount the user can withdraw, in the source token, when no wallet reports it (for
+   * example `custody: 'app'`). It turns on the MAX chip and the check against the balance.
+   */
+  balance?: string
+}
+
 export type ControllerOptions = {
   client: OpenRampClient
   clientSecret: string
+  /** How the flow opens (tab, method, amount, defaults) */
+  flow?: FlowOptions
   wallet?: WalletAdapter
   /** Surfaces this UI can render. Defaults to all built-in ones. */
   surfaces?: string[]
@@ -98,8 +128,19 @@ export function isValidTargetAddress(chain: string, address: string): boolean {
 export function withdrawTokens(chain: string): Array<{ token: string; symbol: string; decimals: number }> {
   return [
     ...(USDC[chain] ? [{ token: USDC[chain]!, symbol: 'USDC', decimals: 6 }] : []),
-    { token: 'native', symbol: CHAINS[chain]?.nativeSymbol ?? 'ETH', decimals: 18 },
+    { token: 'native', symbol: CHAINS[chain]?.nativeSymbol ?? 'ETH', decimals: nativeDecimals(chain) },
   ]
+}
+
+/** Keeps digits and the first decimal point, so "1,000.50" becomes "1000.50". */
+function cleanAmount(amount: string): string {
+  const clean = amount.replace(/[^0-9.]/g, '')
+  const dot = clean.indexOf('.')
+  return dot < 0 ? clean : clean.slice(0, dot + 1) + clean.slice(dot + 1).replace(/\./g, '')
+}
+
+function upperKeys(presets: Record<string, string[]>): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(presets).map(([k, v]) => [k.toUpperCase(), Array.isArray(v) ? v.map((x) => cleanAmount(String(x))).filter(Boolean) : []]))
 }
 
 const CRYPTO_KINDS = new Set(['crypto', 'exchange'])
@@ -120,7 +161,8 @@ export class RampController {
       screen: 'loading',
       direction: opts.expect ?? 'deposit',
       tab: 'crypto',
-      amount: '',
+      amount: cleanAmount(opts.flow?.amount ?? ''),
+      ...(opts.flow?.presets ? { presets: upperKeys(opts.flow.presets) } : {}),
       amountSide: 'source',
       quotes: [],
       quoteErrors: [],
@@ -188,6 +230,8 @@ export class RampController {
         const balances = await this.opts.wallet.getBalances(accounts).catch(() => [] as WalletBalance[])
         this.set({ balances: balances.filter((b) => cmp(b.amount, '0') > 0) })
       }
+      const hostBalance = this.hostBalance(session)
+      if (hostBalance) this.set({ balances: [...this.snap.balances, hostBalance] })
       if (session.direction === 'withdraw') return this.startWithdraw(session)
       this.set({ source: this.defaultSource(session) })
       const plan = await this.opts.client.plan(this.opts.clientSecret, {
@@ -196,11 +240,44 @@ export class RampController {
         ...(this.opts.surfaces ? { surfaces: this.opts.surfaces } : {}),
       })
       const hasCrypto = plan.methods.some((m) => CRYPTO_KINDS.has(m.kind) && m.group !== 'unavailable')
-      this.set({ plan, screen: 'methods', tab: session.destination?.type === 'merchant' || !hasCrypto ? 'cash' : 'crypto' })
+      const hasCash = plan.methods.some((m) => !CRYPTO_KINDS.has(m.kind) && m.group !== 'unavailable')
+      const wanted = this.opts.flow?.initialTab
+      const tab = wanted === 'crypto' && hasCrypto ? 'crypto' : wanted === 'cash' && hasCash ? 'cash' : session.destination?.type === 'merchant' || !hasCrypto ? 'cash' : 'crypto'
+      this.set({ plan, screen: 'methods', tab })
+      await this.openInitialMethod()
     } catch (e) {
       const error = this.fail(e)
       this.set({ screen: 'error', error })
     }
+  }
+
+  /** `FlowOptions.initialMethod`: open the method (or the exchange picker) when the plan has it */
+  private async openInitialMethod() {
+    const want = this.opts.flow?.initialMethod
+    if (!want) return
+    if (want === 'exchanges') return this.openExchanges()
+    const m = this.snap.plan?.methods.find((x) => x.method === want && x.group !== 'unavailable')
+    if (!m) return
+    this.set({ tab: CRYPTO_KINDS.has(m.kind) ? 'crypto' : 'cash' })
+    await this.selectMethod(want)
+  }
+
+  /** False when `lockMethod` keeps the user on the app's `initialMethod` */
+  canGoBack(): boolean {
+    const f = this.opts.flow
+    if (!f?.lockMethod || !f.initialMethod) return true
+    const screen = this.snap.screen
+    if (f.initialMethod === 'exchanges') return screen !== 'exchanges'
+    return this.snap.method?.method !== f.initialMethod || (screen === 'quotes' && !isAddressTransfer(this.snap.method?.method))
+  }
+
+  /** Withdraw: `FlowOptions.balance` as a balance of the session's source token, when no wallet reported one */
+  private hostBalance(session: PublicSession): WalletBalance | undefined {
+    const amount = this.opts.flow?.balance
+    const src = session.source
+    if (session.direction !== 'withdraw' || !src || !amount || !/^\d+(\.\d+)?$/.test(amount)) return undefined
+    if (this.snap.balances.some((b) => b.chain === src.chain && b.token.toLowerCase() === src.token.toLowerCase())) return undefined
+    return { chain: src.chain, token: src.token, symbol: src.symbol ?? 'USDC', decimals: src.decimals ?? 6, amount }
   }
 
   /** The plan that loads after a restart (see `applySession`) */
@@ -273,11 +350,13 @@ export class RampController {
   private startWithdraw(session: PublicSession) {
     const src = session.source
     const chains = this.withdrawChains()
-    const chain = src && chains.includes(src.chain) ? src.chain : chains[0] ?? 'eip155:8453'
+    const want = this.opts.flow?.defaultTarget
+    const chain = want && chains.includes(want.chain) ? want.chain : src && chains.includes(src.chain) ? src.chain : chains[0] ?? 'eip155:8453'
     const allowedCur = session.allowedDestinations?.fiat?.currencies?.map((c) => c.toUpperCase())
     const local = currencyForCountry(session.country).toUpperCase()
     const cashCurrency = !allowedCur?.length || allowedCur.includes(local) ? local : allowedCur[0]!
-    this.set({ target: { ...this.draftFor(chain, src), address: accountFor(this.accounts, chain)?.address ?? this.snap.walletAddress ?? '' }, cashCurrency })
+    const keep = want?.chain === chain ? want.token : undefined
+    this.set({ target: { ...this.draftFor(chain, src, keep), address: accountFor(this.accounts, chain)?.address ?? this.snap.walletAddress ?? '' }, cashCurrency })
     const locked = this.lockedTarget()
     if (locked?.type === 'crypto') {
       // Read only: the UI shows it, and the amount screen names it.
@@ -295,7 +374,8 @@ export class RampController {
       this.set({ screen: 'error', error: openRampError('DESTINATION_NOT_ALLOWED') })
       return
     }
-    this.setTab(tabs[0]!)
+    const wanted = this.opts.flow?.initialTab
+    this.setTab(wanted && tabs.includes(wanted) ? wanted : tabs[0]!)
   }
 
   /** Token for a chain: the source token when it is the source chain, else USDC, else native. */
@@ -480,6 +560,12 @@ export class RampController {
 
   /** Default pay-with token: the largest wallet balance, else USDC on a chain other than the destination. */
   private defaultSource(session: PublicSession): Snapshot['source'] {
+    const want = this.opts.flow?.defaultSource
+    if (want?.chain) {
+      const tokens = defaultSourceTokens(want.chain)
+      const t = want.token ? (tokens.find((o) => sourceTokenKey(want.chain, o.token) === sourceTokenKey(want.chain, want.token!)) ?? { token: want.token }) : tokens[0]!
+      return { chain: want.chain, token: t.token, ...('symbol' in t ? { symbol: t.symbol, decimals: t.decimals } : {}) }
+    }
     const top = [...this.snap.balances].sort((a, b) => cmp(b.usd ?? b.amount, a.usd ?? a.amount))[0]
     if (top) return { chain: top.chain, token: top.token, symbol: top.symbol, decimals: top.decimals }
     const destChain = session.destination?.type === 'crypto' ? session.destination.chain : ''
@@ -659,6 +745,7 @@ export class RampController {
   }
 
   back() {
+    if (!this.canGoBack()) return
     const screen = this.snap.screen
     clearTimeout(this.quoteTimer)
     const list = this.snap.exchange ? 'exchanges' : 'methods'

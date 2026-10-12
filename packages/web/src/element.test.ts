@@ -487,6 +487,20 @@ describe('payment steps (real server)', () => {
     expect(h.c.getSnapshot()).toMatchObject({ exchange: 'coinbase', method: { method: 'exchange_transfer' } })
   })
 
+  it('autoClose: closes on completion with no success screen', async () => {
+    const h = await mount({ country: 'US' })
+    h.el.autoClose = true
+    const closed = vi.fn()
+    h.el.addEventListener('openramp-close', closed)
+    await h.c.selectMethod('transfer')
+    await h.until(() => !h.c.getSnapshot().quotesLoading && h.c.getSnapshot().quotes.length > 0)
+    await h.c.confirm()
+    await h.c.fire('simulate_deposit')
+    await h.until(() => closed.mock.calls.length > 0)
+    expect(h.el.open).toBe(false)
+    expect((closed.mock.calls[0]![0] as CustomEvent).detail.session.step.state).toBe('COMPLETED')
+  })
+
   it('exchange_transfer: own title, exchange examples on the deposit address step, simulate deposit', async () => {
     const h = await mount({ country: 'VN', mock: { settleMs: 0, crypto: true, bridge: true, exchange: true } })
     h.c.setTab('crypto')

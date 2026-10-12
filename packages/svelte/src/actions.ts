@@ -1,6 +1,6 @@
 // Svelte actions (`use:`). They run only in the browser, so server rendering never loads Lit.
 import type { OpenRampError, ClientEvent, PublicSession, WalletAdapter } from '@openrampkit/core'
-import type { DepositController } from '@openrampkit/client'
+import type { DepositController, FlowOptions } from '@openrampkit/client'
 import type { Messages, OpenRampModal } from '@openrampkit/web'
 import type { Appearance, Theme } from '@openrampkit/web/theme'
 import { applyView, onModalClose, startEmbedded } from './embed.js'
@@ -72,6 +72,10 @@ export const depositButton = buttonAction('deposit')
 export const withdrawButton = buttonAction('withdraw')
 
 export type EmbeddedActionParams = {
+  /** How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance */
+  flow?: FlowOptions
+  /** Close as soon as the payment completes, with no success screen */
+  autoClose?: boolean
   clientSecret: string | (() => Promise<string>)
   /** Default values for `baseUrl`, `wallet`, `theme`, `appearance`, `messages`, `locale` and `onEvent`. Follows `ramp.update()`. */
   ramp?: OpenRamp
@@ -136,6 +140,8 @@ export function openRampEmbedded(node: HTMLElement, params: EmbeddedActionParams
       },
       onComplete: (s) => p.onComplete?.(s),
       onController: (c) => p.onController?.(c),
+      ...(p.flow ? { flow: p.flow } : {}),
+      ...(p.autoClose ? { autoClose: true } : {}),
     })
   }
 

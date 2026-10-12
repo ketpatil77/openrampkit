@@ -168,3 +168,7 @@ You need this only when you write `<openramp-modal>` in a template yourself. `Op
 ## Re-exports
 
 Themes: `lightTheme`, `darkTheme`, `autoTheme` (from `@openrampkit/web/theme`, no Lit). Types: `Theme`, `ThemeOptions`, `ThemeColors`, `Appearance`, `RadiusScale`, `DepositController`, `WithdrawController`, `RampController`, `Snapshot`, `PublicSession`, `OpenRampError`, `ClientEvent`, `WalletAdapter`, `OpenRampConfig`, `OpenRampApi`, `OpenRampProviderProps`, `BeginDepositOptions`, `BeginWithdrawOptions`, `DepositButtonProps`, `DepositButtonCustomProps`, `DepositButtonSlotProps`, `WithdrawButtonProps`, `WithdrawButtonCustomProps`, `WithdrawButtonSlotProps`, `OpenRampEmbeddedProps`.
+
+## Flow options
+
+`beginDeposit()` and `beginWithdraw()` take `flow` and `autoClose`, and the embedded component takes them as props. They work as in [`openDeposit`](./web.md#flow-options): `flow` sets the first tab, a method to open at once, the amount, presets, default tokens and a withdraw balance, and `autoClose` closes the modal when the payment completes.

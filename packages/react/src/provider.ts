@@ -2,7 +2,7 @@ import { createContext, createElement, useCallback, useContext, useEffect, useMe
 import type { ReactNode } from 'react'
 import type { ClientEvent, PublicSession, WalletAdapter } from '@openrampkit/core'
 import type { Appearance, Theme } from '@openrampkit/web/theme'
-import type { DepositHandle, Messages, ProviderRenderer } from '@openrampkit/web'
+import type { DepositHandle, FlowOptions, Messages, ProviderRenderer } from '@openrampkit/web'
 import { loadWeb } from './load.js'
 
 export type OpenRampProviderProps = {
@@ -24,6 +24,10 @@ export type OpenRampProviderProps = {
 export type BeginDepositOptions = {
   clientSecret: string | (() => Promise<string>)
   onEvent?: (e: ClientEvent) => void
+  /** How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance */
+  flow?: FlowOptions
+  /** Close as soon as the payment completes, with no success screen */
+  autoClose?: boolean
 }
 
 export type BeginWithdrawOptions = BeginDepositOptions
@@ -78,6 +82,8 @@ export function OpenRampProvider(props: OpenRampProviderProps) {
       ...(c.messages ? { messages: c.messages } : {}),
       ...(c.locale ? { locale: c.locale } : {}),
       ...(c.providerRenderers ? { providerRenderers: c.providerRenderers } : {}),
+      ...(opts.flow ? { flow: opts.flow } : {}),
+      ...(opts.autoClose ? { autoClose: true } : {}),
     })
     handleRef.current = handle
     setOpen(true)

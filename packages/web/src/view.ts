@@ -116,6 +116,16 @@ export function methodSubtitle(x: MethodOption, walletAddress: string | undefine
   return parts.join(' · ')
 }
 
+/**
+ * The app's amount chips (`FlowOptions.presets`): at most 4, no repeats, and only values inside the
+ * bounds when the bounds are in the same currency. Undefined when the app gave none.
+ */
+function appPresets(list: string[] | undefined, bounds: { min?: string; max?: string; currency: string } | undefined): string[] | undefined {
+  if (!list?.length) return undefined
+  const inBounds = (v: string) => Number(v) > 0 && (!bounds?.min || Number(v) >= Number(bounds.min)) && (!bounds?.max || Number(v) <= Number(bounds.max))
+  return [...new Set(list)].filter(inBounds).slice(0, 4)
+}
+
 export type AmountModel = {
   /** Deposit from a wallet: show the pay-with balance picker */
   isWallet: boolean
@@ -161,7 +171,10 @@ export function amountModel(s: Snapshot, m: Messages): AmountModel {
           { label: m.max, value: balance.amount },
         ]
       : []
-    : presetAmounts(currency).map((n) => ({ label: formatFiat(String(n), currency, { compact: true, locale: m.locale }), value: String(n) }))
+    : (appPresets(s.presets?.[currency.toUpperCase()], bounds?.currency.toUpperCase() === currency.toUpperCase() ? bounds : undefined) ?? presetAmounts(currency).map(String)).map((v) => ({
+        label: formatFiat(v, currency, { compact: true, locale: m.locale }),
+        value: v,
+      }))
   return {
     isWallet,
     isWithdraw,

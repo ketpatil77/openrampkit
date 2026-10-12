@@ -125,6 +125,18 @@ describe('methods', () => {
 })
 
 describe('amountModel', () => {
+  it("the app's presets: at most 4, no repeats, inside bounds of the same currency; else the defaults", () => {
+    const s = snap({ method: method({ method: 'card', limits: { min: '10', max: '1000', currency: 'USD' } }), plan: { currency: 'USD', methods: [], pathways: [] }, presets: { USD: ['5', '20', '20', '50', '100', '500', '900', '2000'] } })
+    expect(amountModel(s, en).chips.map((c) => c.value)).toEqual(['20', '50', '100', '500'])
+    // Bounds in another currency do not filter
+    const other = snap({ method: method({ method: 'card', limits: { min: '100000', currency: 'VND' } }), plan: { currency: 'USD', methods: [], pathways: [] }, presets: { USD: ['5'] } })
+    expect(amountModel(other, en).chips.map((c) => c.value)).toEqual(['5'])
+    // No presets for this currency: the built-in chips
+    const none = snap({ method: method({ method: 'card' }), plan: { currency: 'USD', methods: [], pathways: [] }, presets: { EUR: ['5'] } })
+    expect(amountModel(none, en).chips.length).toBeGreaterThan(0)
+    expect(amountModel(none, en).chips.map((c) => c.value)).not.toEqual(['5'])
+  })
+
   it('fiat: plan currency, symbol prefix, bounds from the session and preset chips', () => {
     const s = snap({
       screen: 'amount',

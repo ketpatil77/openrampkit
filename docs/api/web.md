@@ -29,6 +29,8 @@ Mounts `<openramp-modal>`, starts a session and returns a handle. Browser only.
 | `messages` | `Partial<Messages>` | none | Overrides the locale catalog key by key |
 | `container` | `HTMLElement` | `document.body` | Where to mount the element |
 | `embedded` | `boolean` | `false` | Render inline, without the overlay |
+| `flow` | `FlowOptions` | none | How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance. See [Flow options](#flow-options). |
+| `autoClose` | `boolean` | `false` | Close as soon as the payment completes, with no success screen. `done` and `onClose` still get the session. |
 | `onEvent` | `(e: ClientEvent) => void` | none | [Browser events](../concepts/events.md#browser-events) |
 | `onClose` | `(session?: PublicSession) => void` | none | Called once when the modal closes, with the last session |
 | `fetch` | `typeof fetch` | global | Custom fetch, for tests and demos |
@@ -47,6 +49,30 @@ type DepositHandle = {
 ```
 
 When the modal closes before completion, `done` rejects with the step's error if there is one, else the controller's error, else an `OpenRampError` with code `CLOSED` (`CLOSED_CODE`). If the client secret function throws, the modal shows the error screen.
+
+## Flow options
+
+`flow` (`FlowOptions` from `@openrampkit/client`) sets how one session opens. Every option is optional. An option that does not fit the session is ignored: a method the plan does not have, a tab with no methods, or a chain the withdrawal does not allow.
+
+| Option | Type | Description |
+|---|---|---|
+| `initialTab` | `'crypto' \| 'cash'` | The tab to show first. Deposit: `crypto` (wallet, transfer, exchanges) or `cash`. Withdraw: `crypto` (To wallet) or `cash` (To cash). |
+| `initialMethod` | `string` | Deposit: open this method at once, for example `qris`, `transfer`, or `exchanges` (the exchange picker) |
+| `lockMethod` | `boolean` | With `initialMethod`: hide the way back to the method list |
+| `amount` | `string` | Amount to fill in, for example `'50'` |
+| `presets` | `Record<string, string[]>` | Amount chips per currency code: a fiat code, or a token symbol for a wallet deposit. At most 4 show, with no repeats, and only values inside the bounds of the same currency. Without presets for the currency, the built-in chips show. |
+| `defaultSource` | `{ chain, token? }` | Deposit: the token the user pays with first, for wallet and transfer. Without `token`: USDC on the chain, else the native token. |
+| `defaultTarget` | `{ chain, token? }` | Withdraw: the chain and token to receive first on the "To wallet" tab |
+| `balance` | `string` | Withdraw: the amount the user can withdraw, in the source token, when no wallet reports it (for example `custody: 'app'`). It turns on the MAX chip and the check against the balance. |
+
+```ts
+openDeposit({
+  baseUrl: '/api/openramp',
+  clientSecret,
+  flow: { initialTab: 'cash', initialMethod: 'qris', amount: '100000', presets: { IDR: ['50000', '100000', '250000'] } },
+  autoClose: true,
+})
+```
 
 ## openWithdraw(options)
 
@@ -74,6 +100,7 @@ Builds a `DepositController` for one session, with `surfaces` defaulting to `SUP
 | `fetch` | `typeof fetch` | Optional |
 | `surfaces` | `string[]` | Default `SUPPORTED_SURFACES` |
 | `expect` | `'deposit' \| 'withdraw'` | Refuse a session of the other direction. Default: follow the session. |
+| `flow` | `FlowOptions` | Optional. See [Flow options](#flow-options). |
 
 `createWithdrawController(options)` is the same with `expect: 'withdraw'`.
 
@@ -96,6 +123,7 @@ The element renders a controller snapshot and calls its actions. It never talks 
 | `error` | property | `OpenRampError` | Error shown when there is no controller (for example the secret failed to load) |
 | `open` | property and boolean attribute (reflected) | `boolean` | Show the modal (not embedded) |
 | `embedded` | property and boolean attribute (reflected) | `boolean` | Inline mode: no overlay, no close button, Escape does not close |
+| `autoClose` | property, boolean attribute `auto-close` | `boolean` | Close as soon as the payment completes, with no success screen |
 
 ### Methods
 

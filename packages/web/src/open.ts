@@ -1,5 +1,6 @@
 import type { ProviderRenderer } from './provider-sdk.js'
 import { createOpenRampClient, DepositController, toOpenRampError } from '@openrampkit/client'
+import type { FlowOptions } from '@openrampkit/client'
 import { openRampError } from '@openrampkit/core'
 import type { Direction, OpenRampError, ClientEvent, PublicSession, SurfaceKind, WalletAdapter } from '@openrampkit/core'
 import { defineOpenRampModal, OpenRampModal } from './element.js'
@@ -24,6 +25,8 @@ export type CreateControllerOptions = {
   surfaces?: string[]
   /** Refuse a session of the other direction. Default: follow the session. */
   expect?: Direction
+  /** How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance */
+  flow?: FlowOptions
 }
 
 /**
@@ -39,6 +42,7 @@ export function createDepositController(opts: CreateControllerOptions): DepositC
     ...(opts.wallet ? { wallet: opts.wallet } : {}),
     ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
     ...(opts.expect ? { expect: opts.expect } : {}),
+    ...(opts.flow ? { flow: opts.flow } : {}),
   })
 }
 
@@ -68,6 +72,10 @@ export type OpenDepositOptions = {
   container?: HTMLElement
   /** Render inline in `container`, without the overlay */
   embedded?: boolean
+  /** How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance */
+  flow?: FlowOptions
+  /** Close as soon as the payment completes, with no success screen */
+  autoClose?: boolean
   /** Renderers for PROVIDER_SDK surfaces, e.g. `{ stripe: stripeOnrampRenderer() }` */
   providerRenderers?: Record<string, ProviderRenderer>
   onEvent?: (e: ClientEvent) => void
@@ -116,6 +124,7 @@ function openSession(opts: OpenDepositOptions, kind: Direction): DepositHandle {
   if (opts.locale) el.locale = opts.locale
   if (opts.providerRenderers) el.providerRenderers = opts.providerRenderers
   el.embedded = !!opts.embedded
+  el.autoClose = !!opts.autoClose
   el.open = true
   ;(opts.container ?? document.body).appendChild(el)
 
@@ -140,6 +149,7 @@ function openSession(opts: OpenDepositOptions, kind: Direction): DepositHandle {
       ...(opts.wallet ? { wallet: opts.wallet } : {}),
       ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
       ...(opts.fetch ? { fetch: opts.fetch } : {}),
+      ...(opts.flow ? { flow: opts.flow } : {}),
       // Offer PROVIDER_SDK methods (e.g. Stripe's onramp element) only when the app gave a renderer.
       ...(opts.providerRenderers && Object.keys(opts.providerRenderers).length ? { surfaces: [...SUPPORTED_SURFACES, 'PROVIDER_SDK' as const] } : {}),
       expect: kind,

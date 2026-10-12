@@ -1,7 +1,7 @@
 // Framework-agnostic embedded mode: create one controller for one `<openramp-modal embedded>` element.
 import type { ClientEvent, PublicSession, WalletAdapter } from '@openrampkit/core'
 import { toOpenRampError } from '@openrampkit/client'
-import type { DepositController } from '@openrampkit/client'
+import type { DepositController, FlowOptions } from '@openrampkit/client'
 import type { Messages, OpenRampModal, ProviderRenderer } from '@openrampkit/web'
 import type { Appearance, Theme } from '@openrampkit/web/theme'
 import { loadWeb } from './load.js'
@@ -14,6 +14,10 @@ export type EmbedSession = {
   onEvent: (e: ClientEvent) => void
   onComplete: (session: PublicSession) => void
   onController: (controller: DepositController) => void
+  /** How the flow opens (see `FlowOptions`) */
+  flow?: FlowOptions
+  /** Close as soon as the payment completes, with no success screen */
+  autoClose?: boolean
 }
 
 export type EmbedView = {
@@ -32,7 +36,9 @@ export function startEmbedded(el: OpenRampModal, o: EmbedSession): () => void {
     const web = await loadWeb()
     const secret = await web.resolveClientSecret(o.clientSecret)
     if (cancelled) return
+    el.autoClose = !!o.autoClose
     ctl = web.createDepositController({
+      ...(o.flow ? { flow: o.flow } : {}),
       baseUrl: o.baseUrl,
       clientSecret: secret,
       ...(o.wallet ? { wallet: o.wallet } : {}),

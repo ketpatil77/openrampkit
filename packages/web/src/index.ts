@@ -19,7 +19,7 @@ export type { Messages, CatalogLocale, LocaleSources } from './messages.js'
 export { classifyIframeMessage, iframeOrigin, EMBED_SOURCE } from './view.js'
 export type { IframeSignal } from './view.js'
 export { DepositController, WithdrawController, RampController } from '@openrampkit/client'
-export type { Snapshot, ScreenName, SurfaceSignal, Tab, TargetDraft } from '@openrampkit/client'
+export type { FlowOptions, Snapshot, ScreenName, SurfaceSignal, Tab, TargetDraft } from '@openrampkit/client'
 export type { IframeMessages, MethodOption, PlanResult, PublicLegQuote, PublicQuote, PublicSession, Step, Surface, OpenRampError, ClientEvent, WalletAdapter } from '@openrampkit/core'
 
 // Register the element when this module loads in a browser (no-op on the server).

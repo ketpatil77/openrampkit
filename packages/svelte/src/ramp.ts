@@ -1,7 +1,7 @@
 // Framework-agnostic modal state: one open modal at a time, opened with `openDeposit` or `openWithdraw`.
 import type { ClientEvent, PublicSession, WalletAdapter } from '@openrampkit/core'
 import type { Appearance, Theme } from '@openrampkit/web/theme'
-import type { DepositHandle, Messages, ProviderRenderer } from '@openrampkit/web'
+import type { DepositHandle, FlowOptions, Messages, ProviderRenderer } from '@openrampkit/web'
 import { loadWeb } from './load.js'
 
 export type OpenRampConfig = {
@@ -22,6 +22,10 @@ export type OpenRampConfig = {
 export type BeginDepositOptions = {
   clientSecret: string | (() => Promise<string>)
   onEvent?: (e: ClientEvent) => void
+  /** How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance */
+  flow?: FlowOptions
+  /** Close as soon as the payment completes, with no success screen */
+  autoClose?: boolean
 }
 
 export type BeginWithdrawOptions = BeginDepositOptions
@@ -61,6 +65,8 @@ export function createRampCore(getConfig: () => OpenRampConfig, setOpen: (open: 
       ...(c.messages ? { messages: c.messages } : {}),
       ...(c.locale ? { locale: c.locale } : {}),
       ...(c.providerRenderers ? { providerRenderers: c.providerRenderers } : {}),
+      ...(opts.flow ? { flow: opts.flow } : {}),
+      ...(opts.autoClose ? { autoClose: true } : {}),
     })
     handle = h
     setOpen(true)

@@ -2,7 +2,7 @@ import { createElement, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ClientEvent, PublicSession, WalletAdapter } from '@openrampkit/core'
 import { toOpenRampError } from '@openrampkit/client'
-import type { DepositController } from '@openrampkit/client'
+import type { DepositController, FlowOptions } from '@openrampkit/client'
 import type { Messages, OpenRampModal } from '@openrampkit/web'
 import type { Appearance, Theme } from '@openrampkit/web/theme'
 import { loadWeb } from './load.js'
@@ -18,6 +18,10 @@ export type OpenRampEmbeddedProps = {
   messages?: Partial<Messages>
   /** BCP 47 locale. Defaults to the provider's `locale` */
   locale?: string
+  /** How the flow opens: first tab, a method to open at once, amount, presets, default tokens, a withdraw balance */
+  flow?: FlowOptions
+  /** Close as soon as the payment completes, with no success screen */
+  autoClose?: boolean
   onEvent?: (e: ClientEvent) => void
   onComplete?: (session: PublicSession) => void
   /** Called when the user presses Close on a result or error screen */
@@ -54,6 +58,7 @@ export function OpenRampEmbedded(props: OpenRampEmbeddedProps) {
       ctl = web.createDepositController({
         baseUrl,
         clientSecret: secret,
+        ...(props.flow ? { flow: props.flow } : {}),
         ...(wallet ? { wallet } : {}),
         ...(ctx?.providerRenderers && Object.keys(ctx.providerRenderers).length ? { surfaces: [...web.SUPPORTED_SURFACES, 'PROVIDER_SDK' as const] } : {}),
         onEvent: (e) => {
@@ -89,7 +94,8 @@ export function OpenRampEmbedded(props: OpenRampEmbeddedProps) {
     el.locale = locale
     el.providerRenderers = ctx?.providerRenderers
     el.embedded = true
-  }, [controller, theme, appearance, messages, locale, ctx?.providerRenderers])
+    el.autoClose = !!props.autoClose
+  }, [controller, theme, appearance, messages, locale, ctx?.providerRenderers, props.autoClose])
 
   useEffect(() => {
     const el = ref.current

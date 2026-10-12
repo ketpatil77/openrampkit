@@ -71,6 +71,7 @@ export class OpenRampModal extends LitElement {
     error: { attribute: false },
     open: { type: Boolean, reflect: true },
     embedded: { type: Boolean, reflect: true },
+    autoClose: { type: Boolean, attribute: 'auto-close' },
     providerRenderers: { attribute: false },
     _snap: { state: true },
     _sdkError: { state: true },
@@ -94,6 +95,11 @@ export class OpenRampModal extends LitElement {
   declare error: OpenRampError | undefined
   declare open: boolean
   declare embedded: boolean
+  /**
+   * Close as soon as the payment completes, with no success screen (for apps that show their own). The
+   * `openramp-close` event and the handle's `done` still carry the session.
+   */
+  declare autoClose: boolean
   /**
    * Renderers for PROVIDER_SDK surfaces, keyed by provider id (e.g. `{ stripe: stripeOnrampRenderer() }`).
    * Without one, the modal uses the surface's `redirectUrl` when it has one.
@@ -174,6 +180,7 @@ export class OpenRampModal extends LitElement {
     if (!c || !this.isConnected) return
     this._unsub = c.subscribe(() => {
       this._snap = c.getSnapshot()
+      if (this.autoClose && this.open && this._snap.session?.step.state === 'COMPLETED') queueMicrotask(() => this.open && this.close())
     })
   }
 
@@ -462,7 +469,7 @@ export class OpenRampModal extends LitElement {
 
   private _renderHeader(m: Messages) {
     const screen = this._screen
-    const canBack = screen === 'amount' || screen === 'quotes' || screen === 'exchanges'
+    const canBack = (screen === 'amount' || screen === 'quotes' || screen === 'exchanges') && this.controller?.canGoBack() !== false
     const a = this.appearance
     const showLogo = !!a?.logoUrl && (screen === 'methods' || screen === 'loading')
     return html`

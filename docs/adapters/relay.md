@@ -92,6 +92,10 @@ In a [withdraw session](../guide/withdraw.md), the `wallet` leg sends the sessio
 - The bridge leg starts as `processing` with the detail code `waiting_for_deposit`, and completes when Relay reports the request as `success`.
 - The expected deposit is the input of the bridge quote. The tolerance is at least 5%, because the onramp can deliver a little less than its quote.
 
+### Standing deposit addresses
+
+`standingAddress()` gives one Relay open deposit address per user and route, with the destination address as the recipient. The adapter keeps it in the shared store for 400 days after the last call. `standingDeposits()` reads the Relay requests of that address (`depositAddress=...&limit=20`). A request with status `waiting` and no deposit transaction is left out. A deposit's `legRef` is `sreq:<requestId>`, and `status()` reads that request by id. The refund address follows `refundTo`: for user wallets set `refundTo: 'recipient'`. See [Standing deposit addresses](../guide/deposit-addresses.md).
+
 ## Source tokens
 
 `sourceTokens()` gives the deposit picker Relay's default list of verified tokens for each chain (`POST /currencies/v2` with `defaultList` and `verified`). For `transfer` and `exchange_transfer` it asks only for tokens that Relay accepts on a deposit address (`depositAddressOnly`). Each chain's list is cached for 6 hours. A chain that fails is left out, and the server still shows USDC and the native token there.

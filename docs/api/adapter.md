@@ -23,6 +23,9 @@ interface Adapter {
   legs: LegSpec[]
   catalog?(input: CatalogInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<LegSpec[]>
   sourceTokens?(input: { chains: string[]; method: string }, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<SourceToken[]>
+  standingAddress?(input: StandingAddressInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>):
+    Promise<{ address: string; ref: string; data?: Record<string, unknown> }>
+  standingDeposits?(input: StandingDepositsInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<StandingDeposit[]>
   quote(input: QuoteInput, ctx: AdapterContext): Promise<LegQuote>
   prepareDeposit?(input: { leg: PathwayLeg; amountIn?: Amount }, ctx: AdapterContext):
     Promise<{ address: string; ref?: string; data?: Record<string, unknown> }>
@@ -56,6 +59,27 @@ interface Adapter {
 | `health` | `GET /health?deep=1` with the tasks token (plain `GET /health` does not call adapters) |
 | `sourceTokens` | `GET /sessions/:id/sources`, with `{ chains, method }`. Return the tokens the user can pay with, most popular first. The server checks and caches them. |
 | `routes` | Any request to `/adapters/:adapterId/*` |
+| `standingAddress` | `depositAddresses.get()`, the first time for a user and route. Return the same address for the same input, and keep it in `shared` with no TTL or a very long one. |
+| `standingDeposits` | `sweep()`, for each standing address that is due, with the `ref` from `standingAddress` and `since` (ms). Return every deposit seen since then. The server makes one session per new `id`. |
+
+An adapter with standing addresses needs both methods, `status()` (the server polls each deposit with its `legRef`), and a leg with the method `transfer` (the deposit sessions use it). `checkAdapterShape` checks this. See [Standing deposit addresses](../guide/deposit-addresses.md).
+
+```ts
+type StandingAddressInput = {
+  userId: string
+  origin: { chain: string; token: string }             // the asset the user sends
+  destination: Extract<Destination, { type: 'crypto' }> // where each deposit goes
+}
+
+type StandingDepositsInput = { ref: string; address: string; origin: { chain: string; token: string }; since: number }
+
+type StandingDeposit = {
+  id: string      // the same for one deposit on every call: a provider request id, or the deposit tx hash
+  legRef: string  // a ref that status() understands for this one deposit
+  at: number      // when the provider saw the deposit (ms)
+  input?: Amount  // the deposit amount, when known
+}
+```
 
 `resultChannels(adapter)` returns `{ polling, webhooks }`: `polling` is true when the adapter has `status()`, and `webhooks` is true when it has a `webhook` whose `configured` is not `false`. The server uses it at start. It writes one warning for each adapter with legs that has neither, because the payments of that adapter cannot complete. Leg capabilities do not say how results arrive: `LegSpec.capabilities` has only `settlement` and `surface_after_processing`.
 

@@ -181,6 +181,7 @@ There is one catalog for deposits and withdrawals. `data.object.session.directio
 | `session.late_payment` | A payment arrived late: after the session expired, on an earlier attempt, or after a final status | `reason`, `index`, `adapterId`, `legId`, `transactions` (the leg's transactions, when known), `attempt` |
 | `leg.succeeded` | One leg finished | `index`, `adapterId`, `legId` |
 | `leg.failed` | One leg failed | `index`, `adapterId`, `legId`, `error` |
+| `deposit_address.deposit` | A deposit arrived at a [standing deposit address](./deposit-addresses.md), and the server made a session for it (`session.standingAddressId`). Credit at `session.succeeded`, as usual. | `depositAddressId`, `sessionId`, `depositId`, `input` (when known) |
 
 The [background sweep](../api/server.md#background-sweep) finds expired sessions and sends `session.expired`. A request that loads an expired session (for example a browser poll) also sends it. Without a scheduled sweep, a session that nobody loads again never sends `session.expired`.
 

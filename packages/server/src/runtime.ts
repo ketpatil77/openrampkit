@@ -194,7 +194,13 @@ export function publicSession(rec: SessionRecord): PublicSession {
 
 /** The backend view of a session: the browser view plus `userId` and `metadata`. Webhooks and `sessions.retrieve()` use it. */
 export function backendSession(rec: SessionRecord): Session {
-  return { ...publicSession(rec), userId: rec.userId, ...(rec.externalId ? { externalId: rec.externalId } : {}), metadata: rec.metadata ?? {} }
+  return {
+    ...publicSession(rec),
+    userId: rec.userId,
+    ...(rec.externalId ? { externalId: rec.externalId } : {}),
+    metadata: rec.metadata ?? {},
+    ...(rec.standingAddressId ? { standingAddressId: rec.standingAddressId } : {}),
+  }
 }
 
 /**

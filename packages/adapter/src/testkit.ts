@@ -40,6 +40,14 @@ export function checkAdapterShape(adapter: Adapter): ConformanceProblem[] {
       out.push({ where: `leg ${leg.id}`, problem: `surface ${needsTransition.join(', ')} needs transition() (the UI submits the form, the code or the tx hash)` })
     }
   }
+  // A standing address needs both methods, `status()` for each deposit, and a `transfer` leg for its sessions.
+  if (!!adapter.standingAddress !== !!adapter.standingDeposits) {
+    out.push({ where: 'adapter', problem: 'standingAddress and standingDeposits come together (the server polls one for the address of the other)' })
+  }
+  if (adapter.standingAddress && !adapter.status) out.push({ where: 'adapter', problem: 'standingAddress needs status(): the server polls each deposit with its legRef' })
+  if (adapter.standingAddress && !adapter.legs.some((l) => l.methods?.includes('transfer'))) {
+    out.push({ where: 'adapter', problem: 'standingAddress needs a leg with the method transfer (the deposit sessions use it)' })
+  }
   if (adapter.legs.length && !adapter.status && !(adapter.webhook && adapter.webhook.configured !== false)) {
     out.push({ where: 'adapter', problem: 'no status() and no configured webhook: a leg cannot learn its result' })
   }

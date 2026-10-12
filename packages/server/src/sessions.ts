@@ -42,7 +42,7 @@ export const SESSION_LIMITS = {
 const DECIMAL = /^\d{1,30}(\.\d{1,36})?$/
 
 /** Check the parts of the input that are stored or sent to providers. Throws a 400 when one is not valid. */
-function checkInput(input: CreateSessionInput): void {
+export function checkInput(input: CreateSessionInput): void {
   const bad = (message: string) => new OpenRampException(openRampError('BAD_REQUEST', { message }), 400)
   const L = SESSION_LIMITS
   if (typeof input.userId !== 'string' || !input.userId || input.userId.length > L.userIdLength) throw bad(`\`userId\` must be a string of 1 to ${L.userIdLength} characters.`)
@@ -143,42 +143,9 @@ export async function createSession(rt: Runtime, input: CreateSessionInput): Pro
     const found = await existingFor(rt, input, extHash!)
     if (found) return found
   }
-  const id = `ors_${randomHex(12)}`
-  const secret = randomHex(24)
-  const now = Date.now()
-  const expiresAt = now + (input.ttlMinutes ?? 30) * 60_000
-  const direction = input.direction ?? 'deposit'
-  if (direction !== 'deposit' && direction !== 'withdraw') throw new OpenRampException(openRampError('BAD_REQUEST', { message: '`direction` must be "deposit" or "withdraw".' }), 400)
-  if (direction === 'deposit' && input.destination?.type === 'crypto') checkSettlement(input.destination)
-  if (direction === 'deposit' && !input.destination) throw new OpenRampException(openRampError('BAD_REQUEST', { message: 'A deposit session needs `destination`.' }), 400)
-  const rec: SessionRecord = {
-    id,
-    secretHash: await sha256Hex(secret),
-    schema: SESSION_SCHEMA,
-    version: 1,
-    userId: input.userId,
-    ...(input.externalId ? { externalId: input.externalId, externalHash: extHash! } : {}),
-    direction,
-    ...(direction === 'deposit' && input.destination ? { destination: normalizeDestination(input.destination) } : {}),
-    ...(direction === 'withdraw' ? { source: normalizeSource(input.source) } : {}),
-    ...(direction === 'withdraw' && input.allowedDestinations ? { allowedDestinations: input.allowedDestinations } : {}),
-    ...(input.country ? { country: input.country.toUpperCase() } : {}),
-    ...(input.region ? { region: input.region.toUpperCase() } : {}),
-    ...(input.email ? { email: input.email } : {}),
-    ...(input.locale ? { locale: input.locale } : {}),
-    ...(input.amountBounds ? { amountBounds: input.amountBounds } : {}),
-    ...(input.allowedMethods ? { allowedMethods: input.allowedMethods } : {}),
-    ...(input.metadata ? { metadata: input.metadata } : {}),
-    livemode: rt.livemode,
-    status: 'requires_payment_method',
-    createdAt: now,
-    expiresAt,
-    quotes: {},
-    step: { sessionId: id, state: 'SELECT_METHOD', transitions: [], expiresAt: new Date(expiresAt).toISOString() },
-    startUrls: {},
-    notified: [],
-    updatedAt: now,
-  }
+  const { rec, secret } = await draftSession(rt, input, `ors_${randomHex(12)}`, input.externalId ? { externalId: input.externalId, externalHash: extHash! } : {})
+  const { id, expiresAt, createdAt: now } = rec
+  const direction = rec.direction
   if (direction === 'withdraw' && input.destination !== undefined) {
     // The same checks as `POST /sessions/:id/target`: format, `allowedDestinations`, then `screenAddress`.
     const target = parseTarget(input.destination as unknown as Record<string, unknown>)
@@ -218,6 +185,50 @@ export async function createSession(rt: Runtime, input: CreateSessionInput): Pro
   await notify(rt, rec, 'session.created')
   await saveSession(rt, rec, { create: true })
   return { id, clientSecret: `${id}.${secret}`, expiresAt: new Date(expiresAt).toISOString() }
+}
+
+/**
+ * The record of a new session with id `id`, from an input that `checkInput` passed, and its client
+ * secret. Nothing is saved: the caller indexes, notifies and saves it (see `createSession`, and
+ * standing.ts for a session that a deposit made). `extra` goes right after `userId`.
+ */
+export async function draftSession(rt: Runtime, input: CreateSessionInput, id: string, extra: Partial<SessionRecord> = {}): Promise<{ rec: SessionRecord; secret: string }> {
+  const secret = randomHex(24)
+  const now = Date.now()
+  const expiresAt = now + (input.ttlMinutes ?? 30) * 60_000
+  const direction = input.direction ?? 'deposit'
+  if (direction !== 'deposit' && direction !== 'withdraw') throw new OpenRampException(openRampError('BAD_REQUEST', { message: '`direction` must be "deposit" or "withdraw".' }), 400)
+  if (direction === 'deposit' && input.destination?.type === 'crypto') checkSettlement(input.destination)
+  if (direction === 'deposit' && !input.destination) throw new OpenRampException(openRampError('BAD_REQUEST', { message: 'A deposit session needs `destination`.' }), 400)
+  const rec: SessionRecord = {
+    id,
+    secretHash: await sha256Hex(secret),
+    schema: SESSION_SCHEMA,
+    version: 1,
+    userId: input.userId,
+    ...extra,
+    direction,
+    ...(direction === 'deposit' && input.destination ? { destination: normalizeDestination(input.destination) } : {}),
+    ...(direction === 'withdraw' ? { source: normalizeSource(input.source) } : {}),
+    ...(direction === 'withdraw' && input.allowedDestinations ? { allowedDestinations: input.allowedDestinations } : {}),
+    ...(input.country ? { country: input.country.toUpperCase() } : {}),
+    ...(input.region ? { region: input.region.toUpperCase() } : {}),
+    ...(input.email ? { email: input.email } : {}),
+    ...(input.locale ? { locale: input.locale } : {}),
+    ...(input.amountBounds ? { amountBounds: input.amountBounds } : {}),
+    ...(input.allowedMethods ? { allowedMethods: input.allowedMethods } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+    livemode: rt.livemode,
+    status: 'requires_payment_method',
+    createdAt: now,
+    expiresAt,
+    quotes: {},
+    step: { sessionId: id, state: 'SELECT_METHOD', transitions: [], expiresAt: new Date(expiresAt).toISOString() },
+    startUrls: {},
+    notified: [],
+    updatedAt: now,
+  }
+  return { rec, secret }
 }
 
 /**

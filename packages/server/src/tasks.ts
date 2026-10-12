@@ -1,7 +1,7 @@
 // Background work, run by `openramp.sweep()` (for example from a cron trigger or `POST /tasks/sweep`):
-// retry webhooks, refresh open payments, expire old sessions.
+// retry webhooks, poll standing deposit addresses, refresh open payments, expire old sessions.
 //
-// Both lists are store queues (see queue.ts): one entry per session id, with atomic push, claim and ack.
+// The lists are store queues (see queue.ts): one entry per session id, with atomic push, claim and ack.
 // A claim takes the entries that are due longest, so every session gets its turn (round robin), and it
 // holds a lease, so a second sweep at the same time skips those entries. Webhooks are still
 // at-least-once (a lease can end during a slow run): the app must dedupe by event id.
@@ -15,6 +15,7 @@ import { putVersioned } from './runtime.js'
 import { claimToken, GRACE_QUEUE, OPEN_QUEUE, OUTBOX_QUEUE, queueOf, trackOpenSession } from './queue.js'
 import type { Runtime } from './runtime.js'
 import { pruneIndex } from './admin.js'
+import { sweepStanding } from './standing.js'
 import type { SessionRecord } from './store.js'
 
 const LAST_SWEEP_KEY = 'sweep:last-run'
@@ -25,6 +26,8 @@ const LEASE_MS = 10 * 60_000
 export type SweepResult = {
   webhooks: { retried: number; delivered: number; dropped: number; pending: number }
   sessions: { checked: number; changed: number; expired: number; open: number; grace: number }
+  /** Standing deposit addresses: addresses polled, and new deposits (one new session each) */
+  standing: { checked: number; deposits: number }
 }
 
 const gracePollMs = (rt: Runtime) => Math.max(1, rt.config.latePayments?.pollMinutes ?? DEFAULT_LATE_POLL_MINUTES) * 60_000
@@ -92,7 +95,7 @@ export async function sweep(rt: Runtime, opts: { limit?: number } = {}): Promise
   const now = Date.now()
   const q = queueOf(rt.store)
   const token = claimToken()
-  const result: SweepResult = { webhooks: { retried: 0, delivered: 0, dropped: 0, pending: 0 }, sessions: { checked: 0, changed: 0, expired: 0, open: 0, grace: 0 } }
+  const result: SweepResult = { webhooks: { retried: 0, delivered: 0, dropped: 0, pending: 0 }, sessions: { checked: 0, changed: 0, expired: 0, open: 0, grace: 0 }, standing: { checked: 0, deposits: 0 } }
 
   // 1. Webhook outbox: session ids with events to deliver
   for (const sid of await q.claim(OUTBOX_QUEUE, { now, limit, leaseMs: LEASE_MS, token })) {
@@ -109,7 +112,14 @@ export async function sweep(rt: Runtime, opts: { limit?: number } = {}): Promise
   result.webhooks.pending = await q.size(OUTBOX_QUEUE)
   rt.metric('outbox.depth', result.webhooks.pending, {})
 
-  // 2. Open sessions: expire, or refresh the payment (and earlier attempts that still wait)
+  // 2. Standing deposit addresses: each new deposit becomes a session on the open list (step 3 polls it)
+  try {
+    await sweepStanding(rt, { now, limit, token }, result.standing)
+  } catch (e) {
+    rt.log.warn('sweep: standing address check failed', { error: String(e) })
+  }
+
+  // 3. Open sessions: expire, or refresh the payment (and earlier attempts that still wait)
   for (const id of await q.claim(OPEN_QUEUE, { now, limit, leaseMs: LEASE_MS, token })) {
     const rec = await rt.store.get(id)
     if (!rec || isFinalStatus(rec.status)) {
@@ -146,7 +156,7 @@ export async function sweep(rt: Runtime, opts: { limit?: number } = {}): Promise
   result.sessions.open = await q.size(OPEN_QUEUE)
   rt.metric('open_sessions.depth', result.sessions.open, {})
 
-  // 3. Grace list: expired sessions whose payment can still arrive (`latePayments`)
+  // 4. Grace list: expired sessions whose payment can still arrive (`latePayments`)
   for (const id of await q.claim(GRACE_QUEUE, { now, limit, leaseMs: LEASE_MS, token })) {
     const rec = await rt.store.get(id)
     const ended = !rec || (rec.step.state !== 'EXPIRED' && rec.step.state !== 'CANCELED') || !!rec.resolution || !!rec.reversal || !inLateGrace(rt, rec) || !canArriveLate(rt, rec)

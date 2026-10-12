@@ -77,6 +77,7 @@ The server sends these to `webhooks.url`, signed with `webhooks.secret` (Standar
 | `session.late_payment` | A payment arrived late. `reason: 'after_expiry'`: the session had expired, and the payment arrived after all; the session goes on and you also get `session.succeeded`. `reason: 'after_grace'`: the payment arrived after the grace window (`latePayments.graceHours`, default 72); the session stays expired, so refund or credit it by hand. `reason: 'earlier_attempt'`: a payment that the user left with `restart` succeeded, but the session already has a final status, or another payment is in progress; refund or credit it by hand. |
 | `leg.succeeded` | One leg finished |
 | `leg.failed` | One leg failed |
+| `deposit_address.deposit` | A deposit arrived at a [standing deposit address](../guide/deposit-addresses.md), and the server made a session for it. The session events follow on the same session. |
 
 `data.object` for every webhook:
 
@@ -94,6 +95,7 @@ The server sends these to `webhooks.url`, signed with `webhooks.secret` (Standar
   // session.reversed: index, adapterId, legId,
   //   legStatus ('refunded' or 'reversed'), previous (the step state before, e.g. 'COMPLETED'),
   //   attempt (only for an earlier attempt; the session status does not change)
+  // deposit_address.deposit: depositAddressId, sessionId, depositId, input (the deposit, when known)
 }
 ```
 

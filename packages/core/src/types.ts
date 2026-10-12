@@ -789,6 +789,34 @@ export type Session = PublicSession & {
   /** The app's own id for this session (`externalId` at create). Unique per app. */
   externalId?: string
   metadata: Record<string, string>
+  /**
+   * Set when a deposit to a standing deposit address made this session (see `StandingAddress`). The
+   * server made the session after the money arrived, so no user picked a quote.
+   */
+  standingAddressId?: string
+}
+
+// ---------- Standing deposit addresses ----------
+
+/**
+ * A permanent deposit address for one user and one route (`openramp.depositAddresses.get`). Any
+ * deposit of `origin` to `address`, at any time, goes to `destination`. The server watches the address
+ * and makes one deposit session for each deposit it sees (`Session.standingAddressId`).
+ */
+export type StandingAddress = {
+  /** `sda_...`, the same for the same user, route and adapter */
+  id: string
+  userId: string
+  /** The adapter that gave the address and converts the deposits */
+  adapterId: string
+  /** Send `origin` here */
+  address: string
+  /** The asset to send: a CAIP-2 chain and a token address (or `native`) */
+  origin: { chain: string; token: string; symbol?: string; decimals?: number }
+  /** Where each deposit goes */
+  destination: Extract<Destination, { type: 'crypto' }>
+  /** ISO 8601 */
+  createdAt: string
 }
 
 /** The leg of a payment that an event is about */
@@ -828,6 +856,11 @@ export type WebhookEventFields = {
   'session.late_payment': EventLeg & { reason: LatePaymentReason; transactions?: Transaction[] }
   'leg.succeeded': EventLeg
   'leg.failed': EventLeg & { error?: OpenRampError }
+  /**
+   * A deposit arrived at a standing deposit address, and the server made this session for it. The
+   * session events follow (`session.processing`, then `session.succeeded` or `session.failed`).
+   */
+  'deposit_address.deposit': { depositAddressId: string; sessionId: string; depositId: string; input?: Amount }
 }
 
 /** A webhook event type */
@@ -848,6 +881,7 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   'session.late_payment',
   'leg.succeeded',
   'leg.failed',
+  'deposit_address.deposit',
 ]
 
 /** The webhook event of one type */

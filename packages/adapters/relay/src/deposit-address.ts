@@ -247,5 +247,5 @@ export function depositAddresses(rt: RelayRuntime, direct: DirectTransfer) {
     return toBaseUnits(quote.input.value, decimals)
   }
 
-  return { depositQuote, openDepositAddress, nominalAmount, findRelayDeposit, startDeposit, depositRef }
+  return { depositQuote, openDepositAddress, nominalAmount, findRelayDeposit, startDeposit, depositRef, requestKey, requestSourceTxHash, mapRequest }
 }

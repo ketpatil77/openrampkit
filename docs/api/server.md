@@ -72,7 +72,10 @@ await openramp.sessions.cancel(id, { reason? })        // Promise<Session | null
 await openramp.sessions.payLink(id, { ttlMinutes? }) // Promise<PayLink | null>: { id, url, expiresAt }, a signed link to the pay page
 await openramp.sessions.revokePayLink(id, linkId)    // Promise<boolean>: make one pay link stop working; false when the session does not exist
 
-await openramp.sweep({ limit? })       // Promise<SweepResult>: retry webhooks, refresh open payments, expire sessions
+await openramp.sweep({ limit? })       // Promise<SweepResult>: retry webhooks, poll standing addresses, refresh open payments, expire sessions
+
+await openramp.depositAddresses.get({ userId, origin, destination, adapterId? }) // Promise<StandingAddress>: the permanent address of a user and route
+await openramp.depositAddresses.list(userId)                                      // Promise<StandingAddress[]>: newest first
 
 await openramp.webhooks.verify(req, rawBody) // Promise<boolean>: verify a webhook this server sent
 await openramp.webhooks.replay(sessionId)    // Promise<number>: send the dead letters of a session again
@@ -97,6 +100,8 @@ await openramp.admin.providers()              // Promise<ProviderHealth[]>: coun
 
 `webhooks.replay(sessionId)` sends again the events of one session whose retries stopped (dead letters). They keep their event ids and get a new retry window. It returns the number of events, or `0` when the session has none.
 
+`depositAddresses.get` returns a permanent deposit address for one user and route, and makes it on the first call. Each deposit to it becomes a deposit session with the usual webhooks. See [Standing deposit addresses](../guide/deposit-addresses.md).
+
 `admin.*` is for your backend and for operators. `list`, `stats` and `findByTx` read the time index, which the server keeps only when `config.admin` is set. See [Admin and observability](../guide/admin.md).
 
 The type of the returned object is exported as `OpenRamp`.
@@ -108,17 +113,19 @@ Users close tabs, and webhook deliveries fail. `openramp.sweep()` does the backg
 - from a scheduler that runs your code (a [Cloudflare Cron Trigger](../deploy/cloudflare-workers.md#cron-trigger), a [Vercel Cron Job](../deploy/nextjs.md#background-sweep), or any cron), or
 - over HTTP with `POST {baseUrl}/tasks/sweep` and `Authorization: Bearer {tasksToken}` (see [HTTP routes](./http.md#post-tasks-sweep)).
 
-Each run does four things:
+Each run does these things:
 
 1. **Retries failed webhooks.** Each event is saved in its session record (the outbox), and the session id goes on the outbox queue. A delivery that fails (no 2xx answer, or a timeout) stays there. The sweep sends it again when it is due. The wait starts at 30 seconds and doubles after each failed attempt, up to 2 hours. After `webhooks.retryHours` (default 24), or `webhooks.maxAttempts` attempts when you set it, the event becomes a dead letter in the session record. The server logs `webhook moved to dead letter after retries` as an error. `openramp.webhooks.replay(sessionId)` sends the dead letters again.
-2. **Refreshes open payments.** For each open session with an active payment, it asks the active leg's adapter for status, like `sessions.refresh(id)`. This settles legs without provider webhooks (Relay) after the user leaves. It also asks for the status of earlier attempts that the user left with `restart` and that still wait. When one of them was paid, the session completes with it.
-3. **Expires idle sessions.** A session past its expiry moves to `EXPIRED` when no payment started, or when the active leg still waits for the user (`requires_action`). The server sends `session.expired`. A leg that the provider is processing is not expired: the sweep refreshes it instead.
-4. **Polls late payments.** A bank transfer or a deposit to an address can arrive after the session expired. When the expired session's active leg has a provider ref and the adapter has `status()`, the session goes on the grace list. The sweep polls it every `latePayments.pollMinutes` (default 10) for `latePayments.graceHours` (default 72). When the payment arrives, the session moves on from `EXPIRED`: it completes (or the next leg starts), and the server sends `session.late_payment` (with `reason: 'after_expiry'`) and then `session.succeeded`. Set `graceHours: 0` to turn it off. A provider webhook for the waiting leg has the same effect inside the grace window. Only money that arrives on the leg that waited at expiry moves the session on. After the window (or with `graceHours: 0`), a late payment changes the leg data only: the session stays `EXPIRED`, and the server sends `session.late_payment` with `reason: 'after_grace'`. A failure event, an event for an earlier attempt, or a browser request does not change an expired session.
+2. **Polls standing deposit addresses.** For each [standing address](../guide/deposit-addresses.md) that is due, it asks the adapter for new deposits, and makes one session per new deposit. An address is polled every 30 seconds after a deposit in the last hour, then less often, up to every 10 minutes. After 90 days with no deposit and no `depositAddresses.get`, the sweep stops polling it until the next `get`.
+3. **Refreshes open payments.** For each open session with an active payment, it asks the active leg's adapter for status, like `sessions.refresh(id)`. This settles legs without provider webhooks (Relay) after the user leaves. It also asks for the status of earlier attempts that the user left with `restart` and that still wait. When one of them was paid, the session completes with it.
+4. **Expires idle sessions.** A session past its expiry moves to `EXPIRED` when no payment started, or when the active leg still waits for the user (`requires_action`). The server sends `session.expired`. A leg that the provider is processing is not expired: the sweep refreshes it instead.
+5. **Polls late payments.** A bank transfer or a deposit to an address can arrive after the session expired. When the expired session's active leg has a provider ref and the adapter has `status()`, the session goes on the grace list. The sweep polls it every `latePayments.pollMinutes` (default 10) for `latePayments.graceHours` (default 72). When the payment arrives, the session moves on from `EXPIRED`: it completes (or the next leg starts), and the server sends `session.late_payment` (with `reason: 'after_expiry'`) and then `session.succeeded`. Set `graceHours: 0` to turn it off. A provider webhook for the waiting leg has the same effect inside the grace window. Only money that arrives on the leg that waited at expiry moves the session on. After the window (or with `graceHours: 0`), a late payment changes the leg data only: the session stays `EXPIRED`, and the server sends `session.late_payment` with `reason: 'after_grace'`. A failure event, an event for an earlier attempt, or a browser request does not change an expired session.
 
 ```ts
 type SweepResult = {
   webhooks: { retried: number; delivered: number; dropped: number; pending: number }
   sessions: { checked: number; changed: number; expired: number; open: number; grace: number } // grace: expired sessions polled for a late payment
+  standing: { checked: number; deposits: number } // standing addresses polled, and new deposits (one session each)
 }
 ```
 

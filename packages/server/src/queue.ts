@@ -12,6 +12,8 @@ export const OUTBOX_QUEUE = 'outbox'
 export const OPEN_QUEUE = 'open-sessions'
 /** Expired sessions whose payment may still arrive: polled at a slower rate (`latePayments`) */
 export const GRACE_QUEUE = 'grace-sessions'
+/** Standing deposit addresses, due at their next poll (see standing.ts) */
+export const STANDING_QUEUE = 'standing-addresses'
 
 const fallbacks = new WeakMap<SessionStore, StoreQueue>()
 

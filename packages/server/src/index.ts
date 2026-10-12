@@ -19,11 +19,13 @@ import type { CreatedSession, ExistingSession } from './sessions.js'
 import { adminFindByRef, adminFindByTx, adminGet, adminList, adminReplay, adminResolve, adminStats } from './admin.js'
 import type { AdminListOptions } from './admin.js'
 import { providerHealth } from './health.js'
+import { getStandingAddress, listStandingAddresses } from './standing.js'
+import type { DepositAddressInput } from './standing.js'
 
 export * from './store.js'
 export * from './durable-object-store.js'
 export { generateWebhookSecret, signWebhook, verifyWebhook } from './crypto.js'
-export type { ClientEvent, Session, WebhookEvent, WebhookEventOf, WebhookEventType } from '@openrampkit/core'
+export type { ClientEvent, Session, StandingAddress, WebhookEvent, WebhookEventOf, WebhookEventType } from '@openrampkit/core'
 export type { AdminConfig, CreateSessionInput, OpenRampConfig, RoutingConfig, Telemetry, TreasuryHook, TreasurySendInput } from './config.js'
 export { TreasuryRefusedError, isTreasuryRefused } from './config.js'
 export type { BreakerState, HealthCounts, ProviderHealth } from './health.js'
@@ -32,6 +34,7 @@ export { isValidAddress } from './withdraw.js'
 export type { CreatedSession, ExistingSession } from './sessions.js'
 export type { PayLink } from './pay.js'
 export type { SweepResult } from './tasks.js'
+export type { DepositAddressInput } from './standing.js'
 
 export function createOpenRamp(config: OpenRampConfig) {
   const rt = createRuntime(config)
@@ -132,6 +135,21 @@ export function createOpenRamp(config: OpenRampConfig) {
      * (Cloudflare Cron Trigger, Vercel Cron, or any scheduler), or call `POST {baseUrl}/tasks/sweep`.
      */
     sweep: (opts?: { limit?: number }) => sweep(rt, opts),
+    /**
+     * Standing deposit addresses: one permanent address per user and route. Any deposit to it, at any
+     * time, becomes a deposit session (`session.standingAddressId`) with the usual webhooks, plus
+     * `deposit_address.deposit` when the server first sees it. `sweep()` watches the addresses.
+     */
+    depositAddresses: {
+      /**
+       * The address of a user and route (`origin` chain and token, crypto `destination`), made on the
+       * first call. The same input returns the same address. A call also starts the watch again after
+       * 90 idle days. Throws `400` when no adapter gives standing addresses.
+       */
+      get: (input: DepositAddressInput) => getStandingAddress(rt, input),
+      /** The standing addresses of a user, newest first */
+      list: (userId: string) => listStandingAddresses(rt, userId),
+    },
     webhooks: {
       /** Verify a webhook your backend received (Standard Webhooks headers; use the raw body text) */
       verify: (req: Request, body: string) => (config.webhooks ? verifyWebhook(config.webhooks.secret, req.headers, body) : Promise.resolve(false)),

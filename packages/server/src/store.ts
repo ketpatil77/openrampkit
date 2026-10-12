@@ -148,6 +148,11 @@ export type SessionRecord = {
   reversal?: Reversal
   /** Provider event ids applied to this session (`adapterId:ref:eventId`), newest last. At most 50. */
   providerEvents?: string[]
+  /**
+   * Set when a deposit to a standing deposit address made this session (see standing.ts). The deposit
+   * arrived before the session, so a failure is final, and nobody holds the client secret.
+   */
+  standingAddressId?: string
 }
 
 /** A refund or a chargeback after a leg succeeded (see `SessionRecord.reversal`) */

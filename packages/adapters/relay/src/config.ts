@@ -91,6 +91,8 @@ export const SOLANA_NATIVE = '11111111111111111111111111111111'
 export const PLACEHOLDER_USER = '0x000000000000000000000000000000000000dEaD'
 export const PLACEHOLDER_SOLANA_USER = SOLANA_NATIVE
 export const DEPOSIT_ADDRESS_TTL_SEC = 24 * 60 * 60
+/** A standing deposit address stays in `shared` this long after its last use (each call refreshes it) */
+export const STANDING_ADDRESS_TTL_SEC = 400 * 24 * 60 * 60
 /** An open deposit watch (see `Watcher`) counts as a rival for this long after its leg started */
 export const WATCH_TTL_SEC = 24 * 60 * 60
 /** How long a used transaction, log or Relay request stays recorded */

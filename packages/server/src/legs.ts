@@ -279,7 +279,8 @@ export function maxAttempts(rt: Runtime): number {
  *   quote), and a new attempt cannot use them;
  * - money left on this attempt (a later leg started, the treasury sent, or a transaction was
  *   submitted): a new attempt could pay out or pay in a second time;
- * - the session has no attempts left (`policy.maxAttempts`).
+ * - the session has no attempts left (`policy.maxAttempts`);
+ * - the session was made for a deposit to a standing address (`standingAddressId`).
  * Else the failure ends only this attempt: the session goes back to `requires_payment_method`.
  */
 export function isFinalFailure(rt: Runtime, rec: SessionRecord): boolean {
@@ -287,6 +288,8 @@ export function isFinalFailure(rt: Runtime, rec: SessionRecord): boolean {
   if (rec.step.state !== 'FAILED') return false
   const act = rec.active
   if (!act) return true
+  // A deposit to a standing address: the money arrived before the session, so no new attempt can pay it.
+  if (rec.standingAddressId) return true
   // Money arrived on a leg (a hop, or another asset than the quote): a new attempt cannot use it.
   if (act.legs.some((l) => l.step?.status === 'succeeded')) return true
   // Money left on this attempt: a later leg started, the treasury sent, or a transaction was submitted.

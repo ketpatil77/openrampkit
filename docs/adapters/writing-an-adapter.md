@@ -22,6 +22,9 @@ export function acme(opts: AcmeOptions) {
     webhook: { async verify(req, rawBody, ctx) {}, async parse(rawBody, ctx) {} },
     async catalog(input, ctx) { /* -> LegSpec[] */ },
     async prepareDeposit(input, ctx) { /* -> { address } */ },
+    async sourceTokens(input, ctx) { /* -> SourceToken[] */ },
+    async standingAddress(input, ctx) { /* -> { address, ref } */ },
+    async standingDeposits(input, ctx) { /* -> StandingDeposit[] */ },
     async routes(req, subpath, ctx) { /* -> Response | undefined */ },
     async health(ctx) { /* -> { ok, detail? } */ },
   })
@@ -231,6 +234,10 @@ The `WALLET_TX` step needs a `SURFACE_RESULT` transition that expects `tx_hash`.
 ## prepareDeposit()
 
 Only for bridge legs. Before the server quotes a two-leg pathway, it asks the second leg's adapter for the address the first leg must deliver to. Relay returns an open deposit address.
+
+## standingAddress() and standingDeposits()
+
+Only for a provider that can give a reusable deposit address. `standingAddress()` returns one address for a user and route (origin chain and token, crypto destination). The same input must return the same address: keep it in `shared`. `standingDeposits()` lists the deposits at that address since a time. Give each deposit an `id` that does not change (the provider request id, or the deposit transaction hash) and a `legRef` that your `status()` understands. The server makes one deposit session per new `id` and polls `status(legRef)` until the leg ends. See [Standing deposit addresses](../guide/deposit-addresses.md).
 
 ## routes()
 

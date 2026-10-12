@@ -53,7 +53,25 @@ The backend view of a session: `PublicSession` plus the app's data. Webhooks (`d
 ```ts
 type Session = PublicSession & {
   userId: string
+  externalId?: string
   metadata: Record<string, string>
+  standingAddressId?: string // set when a deposit to a standing address made the session
+}
+```
+
+### StandingAddress
+
+A permanent deposit address for one user and route (`openramp.depositAddresses.get`). See [Standing deposit addresses](../guide/deposit-addresses.md).
+
+```ts
+type StandingAddress = {
+  id: string        // sda_...
+  userId: string
+  adapterId: string
+  address: string   // send `origin` here
+  origin: { chain: string; token: string; symbol?: string; decimals?: number }
+  destination: Extract<Destination, { type: 'crypto' }>
+  createdAt: string // ISO 8601
 }
 ```
 

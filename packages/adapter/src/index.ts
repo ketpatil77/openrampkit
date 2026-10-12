@@ -114,6 +114,36 @@ export type LegEvent = LegStep & {
 
 export type CatalogInput = { country?: string; currency: string; direction: Direction }
 
+/** The route of a standing deposit address (see `Adapter.standingAddress`) */
+export type StandingAddressInput = {
+  userId: string
+  /** The asset the user sends: a CAIP-2 chain and a token address (or `native`) */
+  origin: { chain: string; token: string }
+  /** Where each deposit goes (always a crypto destination) */
+  destination: Extract<Destination, { type: 'crypto' }>
+}
+
+export type StandingDepositsInput = {
+  /** The `ref` that `standingAddress` returned */
+  ref: string
+  address: string
+  origin: { chain: string; token: string }
+  /** Return deposits seen at or after this time (ms). Repeats are fine: the server dedupes by `id`. */
+  since: number
+}
+
+/** One deposit at a standing address (see `Adapter.standingDeposits`) */
+export type StandingDeposit = {
+  /** The same for one deposit on every call: a provider request id, or the deposit transaction hash */
+  id: string
+  /** The ref that `status()` understands for this deposit */
+  legRef: string
+  /** When the provider saw the deposit (ms) */
+  at: number
+  /** The deposit amount, when known */
+  input?: Amount
+}
+
 /**
  * The provider environment that an adapter calls: test keys and no real money (`sandbox`), or real
  * money (`production`). Every first-party adapter takes it as the `env` option.
@@ -138,6 +168,21 @@ export interface Adapter {
    * adds the default tokens (USDC and native). It only fills the picker: the quote decides what is valid.
    */
   sourceTokens?(input: { chains: string[]; method: string }, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<SourceToken[]>
+  /**
+   * Optional: a reusable deposit address for one user and route (`openramp.depositAddresses.get`).
+   * Any deposit of `origin` to it, at any time, must reach `destination`. It must be stable: the same
+   * input returns the same address. Keep it in `ctx.shared` with no TTL, or a very long one. `ref` is
+   * what `standingDeposits` gets back. The server keeps its own record, so it calls this once per route.
+   */
+  standingAddress?(input: StandingAddressInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<{ address: string; ref: string; data?: Record<string, unknown> }>
+  /**
+   * Optional, with `standingAddress`: the deposits seen at a standing address since `since` (ms).
+   * The server polls it from `sweep()` and makes one deposit session per new `id`. `id` must be the
+   * same for one deposit on every call (a provider request id, or the deposit transaction hash).
+   * `legRef` is a ref that `status()` understands for this one deposit: the session's leg polls it.
+   * `input` is the deposit amount, when the provider says it.
+   */
+  standingDeposits?(input: StandingDepositsInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<StandingDeposit[]>
   /** Optional live catalog: returns legs refined for this user (methods, limits, assets) */
   catalog?(input: CatalogInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<LegSpec[]>
   quote(input: QuoteInput, ctx: AdapterContext): Promise<LegQuote>

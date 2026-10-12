@@ -162,6 +162,8 @@ export type AdminSessionSummary = {
   userId: string
   /** The app's own id (`externalId` at create) */
   externalId?: string
+  /** The standing deposit address whose deposit made this session */
+  standingAddressId?: string
   livemode: boolean
   createdAt: string
   updatedAt: string
@@ -267,6 +269,7 @@ function summarize(rt: Runtime, rec: SessionRecord, now: number): AdminSessionSu
     ...(act ? { method: act.pathway.method, provider: act.pathway.provider } : {}),
     userId: rec.userId,
     ...(rec.externalId ? { externalId: rec.externalId } : {}),
+    ...(rec.standingAddressId ? { standingAddressId: rec.standingAddressId } : {}),
     livemode: rec.livemode,
     createdAt: iso(rec.createdAt)!,
     updatedAt: iso(rec.updatedAt ?? rec.createdAt)!,

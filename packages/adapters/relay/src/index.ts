@@ -8,9 +8,13 @@
 //
 // Server-side only. Web-standard APIs only (fetch, WebCrypto), so it runs on Cloudflare Workers.
 //
+// Standing deposit addresses: `standingAddress` gives one open deposit address per user and route,
+// `standingDeposits` lists the deposits Relay saw at it, and `status()` follows one deposit (`sreq:` ref).
+//
 // Files: `config.ts` (options, RPC defaults), `client.ts` (Relay API and RPC calls), `quotes.ts`,
 // `deposit-address.ts` (Relay open deposit addresses), `direct-transfer.ts` (one deposit for one leg,
-// log scanning), `wallet.ts` (wallet leg, EVM and Solana checks). This file wires them together.
+// log scanning), `wallet.ts` (wallet leg, EVM and Solana checks), `standing.ts` (standing deposit
+// addresses). This file wires them together.
 
 import { createAdapter, erc20TransferData } from '@openrampkit/adapter'
 import type { AdapterContext } from '@openrampkit/adapter'
@@ -24,6 +28,7 @@ import { directTransfer } from './direct-transfer.js'
 import { POLL_TRANSITION, addrKey, awaitingTx, cryptoAsset, deliveredOutput, destAsset, isSolana, recipientOf, relayStep, relayTransactions, requestIdFromRef, toOpenRamp } from './helpers.js'
 import { quotes, relayLegs } from './quotes.js'
 import { relaySources } from './sources.js'
+import { STANDING_REF, standingAddresses } from './standing.js'
 import type { DepositRecord, RelayIntentStatus, WalletRecord } from './types.js'
 import { walletLeg } from './wallet.js'
 
@@ -46,6 +51,7 @@ export function relay(opts: RelayOptions = {}) {
   const { findDirectDeposit } = direct
   const { openDepositAddress, depositRef, startDeposit, findRelayDeposit } = deposits
   const { sourceTokens } = relaySources(rt)
+  const { standingAddress, standingDeposits, standingStatus } = standingAddresses(rt, deposits)
 
   /**
    * What a completed wallet request delivered, from Relay's request (`GET /requests/v3?id=`). The
@@ -69,6 +75,13 @@ export function relay(opts: RelayOptions = {}) {
     env: /testnets/.test(opts.baseUrl ?? '') ? 'sandbox' : 'production',
     legs,
     sourceTokens,
+
+    async standingAddress(input, ctx) {
+      warnNoKey(ctx.log)
+      return standingAddress(input, ctx)
+    },
+
+    standingDeposits,
 
     async quote(input, ctx) {
       warnNoKey(ctx.log)
@@ -129,6 +142,8 @@ export function relay(opts: RelayOptions = {}) {
     },
 
     async status(input, ctx) {
+      // One deposit at a standing address: its Relay request decides.
+      if (input.ref.startsWith(STANDING_REF)) return standingStatus(ctx, input.ref)
       const { legId } = input.leg
       if (legId === 'wallet') {
         const rec = await ctx.store.get<WalletRecord>(`w:${input.ref}`)

@@ -76,6 +76,7 @@ await openramp.admin.findByTx(chain, txHash)  // AdminSessionSummary[] (chain ca
 await openramp.admin.stats({ since? })        // AdminStats
 await openramp.admin.resolve(id, 'COMPLETED', 'Paid by bank transfer, ticket 123') // AdminSession
 await openramp.admin.replayWebhooks(id)       // { queued: number }
+await openramp.admin.providers()              // ProviderHealth[]
 ```
 
 ### list
@@ -121,6 +122,10 @@ Counts for the sessions created since `since` (a time in ms, an ISO 8601 string 
 
 One call reads at most 2000 sessions. Then `truncated` is `true`, and the counts cover the newest sessions only.
 
+### providers
+
+Provider health per adapter: quote, start and leg counts in `routing.healthWindowHours` (default 24), the success rate that breaks ranking ties, the recent failure rate, and the circuit breaker state (`closed`, `open` or `half_open`). It needs no time index. See [Provider health](../api/server.md#provider-health).
+
 ### resolve
 
 `resolve(id, state, note)` forces a final state: `COMPLETED`, `FAILED`, `REFUNDED` or `EXPIRED`. The note is required (1 to 500 characters).
@@ -157,6 +162,7 @@ All need `Authorization: Bearer {admin.token}`, except the page. See [HTTP route
 | `POST` | `/admin/sessions/:id/resolve` | `resolve`. Body: `{ "state": "COMPLETED", "note": "..." }` |
 | `POST` | `/admin/sessions/:id/replay` | `replayWebhooks` |
 | `GET` | `/admin/stats?since=` | `stats` |
+| `GET` | `/admin/providers` | `providers`. Answer: `{ "providers": [...] }` |
 | `GET` | `/admin/find?provider=&ref=` or `/admin/find?tx=&chain=` | `findByRef` or `findByTx`. Answer: `{ "sessions": [...] }` |
 
 ## Metrics
@@ -167,6 +173,10 @@ All need `Authorization: Bearer {admin.token}`, except the page. See [HTTP route
 |---|---|---|---|
 | `quote.latency_ms` | ms | `adapter`, `ok` | Each adapter quote |
 | `start.error` | 1 | `adapter`, `code` | The first leg of a payment did not start |
+| `payment.failover` | 1 | `from`, `to` | A start failed with a provider error, and the server tries the next quote from adapter `to` |
+| `breaker.opened` | 1 | `adapter` | Too many recent quotes and starts of the adapter failed; quotes skip it |
+| `breaker.closed` | 1 | `adapter` | A probe quote worked after the cool-down |
+| `quote.skipped` | 1 | `adapter`, `reason` | A pathway was not quoted (`reason: breaker`) |
 | `webhook.verify_failed` | 1 | `adapter` | A provider webhook failed verification |
 | `event.out_of_order` | 1 | `adapter` | A provider event would move a leg back; the server ignored it |
 | `leg.delivery_mismatch` | 1 | `adapter`, `status` | A leg's delivery is not `ok`: `short` (less than `minOutput`, or beyond `policy.outputToleranceBps`), `asset_mismatch` or `invalid` |
@@ -180,7 +190,7 @@ All need `Authorization: Bearer {admin.token}`, except the page. See [HTTP route
 | `sweep.duration_ms` | ms | none | Each sweep |
 | `sessions.stuck` | count | none | Each `stats` call |
 
-Alert on a high `sweep.lag_ms` (the scheduler stopped), a growing `outbox.depth`, any `webhook.dead_letter`, and `webhook.verify_failed` (a wrong provider secret or forged requests).
+Alert on a high `sweep.lag_ms` (the scheduler stopped), a growing `outbox.depth`, any `webhook.dead_letter`, `webhook.verify_failed` (a wrong provider secret or forged requests), and `breaker.opened` (a provider is down).
 
 ## The time index and its limits
 

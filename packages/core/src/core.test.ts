@@ -118,6 +118,20 @@ describe('rankQuotes', () => {
     expect(r[0]!.badges).toEqual(['best_price'])
     expect(r[2]!.badges).toEqual(['fastest'])
   })
+  it('breaks ties of output and ETA by success rate, never before them', () => {
+    const q = (id: string, out: string, eta: number): Quote => ({
+      id, pathwayId: id, method: 'card', provider: id, legs: [],
+      input: { value: '100', asset: { kind: 'fiat', currency: 'USD' } },
+      output: { value: out, asset: { kind: 'crypto', chain: 'eip155:8453', token: 'x' } }, fees: [], eta: { min: 0, max: eta },
+      guarantee: 'estimate', expiresAt: '2099-01-01T00:00:00.000Z',
+    })
+    const rates: Record<string, number> = { a: 0.5, b: 0.9, c: 0.99, d: 0.1 }
+    const r = rankQuotes([q('a', '97', 60), q('b', '97', 60), q('c', '96', 60), q('d', '97', 30)], { successRate: (x) => rates[x.id] })
+    // d is faster at the same output; c delivers less. Only a and b tie, and b has the better rate.
+    expect(r.map((x) => x.id)).toEqual(['d', 'b', 'a', 'c'])
+    // With no rate for a side, the input order stays.
+    expect(rankQuotes([q('a', '97', 60), q('b', '97', 60)], { successRate: (x) => (x.id === 'b' ? 0.9 : undefined) }).map((x) => x.id)).toEqual(['a', 'b'])
+  })
 })
 
 describe('exchange_transfer method', () => {

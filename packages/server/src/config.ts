@@ -133,6 +133,32 @@ export type OpenRampConfig = {
    * Only adapters with `status()` can be polled; a provider webhook completes an expired session too.
    */
   latePayments?: { graceHours?: number; pollMinutes?: number }
+  /** Provider health, ranking and the circuit breaker. See `RoutingConfig`. */
+  routing?: RoutingConfig
+}
+
+/**
+ * The server counts, per adapter and hour, quotes that worked or failed, starts that worked or failed,
+ * and legs that succeeded or failed (best effort, in the store's KV space). It uses the counts to:
+ * - break ties in the quote ranking (after the delivered amount and the ETA) by the recent success rate;
+ * - skip an adapter whose recent quotes and starts mostly fail (the circuit breaker);
+ * - show provider health to operators (`admin.providers()`).
+ * A start that fails with a provider error tries the next best quote of the same method (at most 2 more).
+ */
+export type RoutingConfig = {
+  /** Hours of counts for the success rate and the admin view (default 24) */
+  healthWindowHours?: number
+  /** Fewest samples before a rate counts. With fewer, the adapter is neutral (default 20). */
+  minSamples?: number
+  /**
+   * The breaker opens when more than this share of the adapter's quotes and starts in the last one to two
+   * hours failed (default 0.8). `1` turns the breaker off.
+   */
+  breakerFailureRate?: number
+  /** Minutes an open breaker skips the adapter before it lets one probe quote through (default 10) */
+  breakerCooldownMinutes?: number
+  /** `false` turns the circuit breaker off. Ranking and failover still work. Default true. */
+  breaker?: boolean
 }
 
 export type AdminConfig = {
@@ -151,7 +177,8 @@ export type AdminConfig = {
  * Send them to your metrics system (StatsD, Prometheus, Datadog, OpenTelemetry). An error in the
  * callback is ignored. Names: `quote.latency_ms`, `start.error`, `webhook.verify_failed`, `event.out_of_order`, `leg.delivery_mismatch`, `payment.reversed`, `webhook.replayed`,
  * `webhook.delivery_failed`, `webhook.dead_letter`, `outbox.depth`, `open_sessions.depth`,
- * `sweep.lag_ms`, `sweep.duration_ms`, `sessions.stuck`.
+ * `sweep.lag_ms`, `sweep.duration_ms`, `sessions.stuck`, `breaker.opened`, `breaker.closed`, `quote.skipped`,
+ * `payment.failover`.
  */
 export type Telemetry = {
   onMetric(name: string, value: number, tags: Record<string, string>): void

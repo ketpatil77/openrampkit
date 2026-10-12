@@ -256,8 +256,11 @@ When the user enters an amount, the server quotes up to 5 available pathways for
 - A failed pathway becomes an entry in `errors`, not an exception.
 - The combined quote sums fees and ETAs, and expires at the earliest leg expiry. Every leg quote has an `expiresAt`; the server gives 5 minutes to a leg quote without a valid one.
 - The combined `guarantee` is the weakest of the legs (`estimate` is weaker than `min_output`, which is weaker than `firm`). `minOutput` and `slippageBps` come from the last leg. See [Fee and Quote](../api/core.md#fee-and-quote).
+- An adapter whose recent quotes and starts mostly fail is skipped (the circuit breaker), with `PROVIDER_UNAVAILABLE` in `errors`. See [Provider health](../api/server.md#provider-health).
 
-`rankQuotes` sorts by the most delivered first, then by the fastest. It marks the first quote `best_price`, and the fastest one `fastest` when there is more than one quote.
+`rankQuotes` sorts by the most delivered first, then by the fastest, then by the providers' recent success rate, then in the planner's order. It marks the first quote `best_price`, and the fastest one `fastest` when there is more than one quote.
+
+When the chosen quote's first leg fails to start with a provider error, the server starts the next best quote of the same list (at most 2 more). See [Provider health](../api/server.md#provider-health).
 
 ```mermaid
 sequenceDiagram
@@ -270,6 +273,7 @@ sequenceDiagram
   B->>S: POST /sessions/:id/quotes { method, amount }
   S->>P: planPathways(session, method)
   P-->>S: Up to 5 candidate pathways
+  S->>S: Skip adapters with an open circuit breaker
   par Each pathway, 9 s timeout
     S->>A1: quote(leg 1, amount)
     A1-->>S: LegQuote (output, fee, eta, expiresAt)
@@ -281,7 +285,7 @@ sequenceDiagram
   end
   S->>S: Drop quotes outside amountBounds
   S->>S: Sum fees and ETAs, take the earliest expiry and the weakest guarantee
-  S->>S: rankQuotes(): best_price, fastest
+  S->>S: rankQuotes(): ties broken by success rate; best_price, fastest
   S-->>B: { quotes, errors }
   Note over B: Re-quotes 10 seconds before the earliest expiry
 ```

@@ -18,13 +18,15 @@ import type { CreateSessionInput } from './config.js'
 import type { CreatedSession, ExistingSession } from './sessions.js'
 import { adminFindByRef, adminFindByTx, adminGet, adminList, adminReplay, adminResolve, adminStats } from './admin.js'
 import type { AdminListOptions } from './admin.js'
+import { providerHealth } from './health.js'
 
 export * from './store.js'
 export * from './durable-object-store.js'
 export { generateWebhookSecret, signWebhook, verifyWebhook } from './crypto.js'
 export type { ClientEvent, Session, WebhookEvent, WebhookEventOf, WebhookEventType } from '@openrampkit/core'
-export type { AdminConfig, CreateSessionInput, OpenRampConfig, Telemetry, TreasuryHook, TreasurySendInput } from './config.js'
+export type { AdminConfig, CreateSessionInput, OpenRampConfig, RoutingConfig, Telemetry, TreasuryHook, TreasurySendInput } from './config.js'
 export { TreasuryRefusedError, isTreasuryRefused } from './config.js'
+export type { BreakerState, HealthCounts, ProviderHealth } from './health.js'
 export type { AdminLeg, AdminListOptions, AdminListResult, AdminOutboxEvent, AdminPayment, AdminSession, AdminSessionSummary, AdminStats } from './admin.js'
 export { isValidAddress } from './withdraw.js'
 export type { CreatedSession, ExistingSession } from './sessions.js'
@@ -158,6 +160,11 @@ export function createOpenRamp(config: OpenRampConfig) {
       resolve: (id: string, state: 'COMPLETED' | 'FAILED' | 'REFUNDED' | 'EXPIRED', note: string) => adminResolve(rt, id, state, note),
       /** Send the dead letters of a session again (same as `webhooks.replay`) */
       replayWebhooks: (id: string) => adminReplay(rt, id),
+      /**
+       * Provider health per adapter: quote, start and leg counts in the window (`routing.healthWindowHours`),
+       * the success rate, the recent failure rate and the circuit breaker state. It needs no time index.
+       */
+      providers: () => providerHealth(rt),
     },
   }
 }

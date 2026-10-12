@@ -47,6 +47,11 @@ const openramp = createOpenRamp({
 | `admin` | `{ token?, stuckAfterMinutes?, indexDays?, page? }` | none | Admin tools. With `admin`, the server keeps a time index of new sessions. With `token` (at least 32 characters), the routes `/admin/*` and the dashboard `GET /admin` are on. See [Admin and observability](../guide/admin.md). |
 | `latePayments` | `{ graceHours?, pollMinutes? }` | `{ graceHours: 72, pollMinutes: 10 }` | After the sweep expires a session whose payment still waits, it keeps polling that payment for `graceHours`, every `pollMinutes`. A late payment completes the session and sends `session.late_payment`. `graceHours: 0` turns it off. See [Background sweep](#background-sweep). |
 | `telemetry` | `{ onMetric(name, value, tags) }` | none | A plain metrics callback: quote latency, start errors, webhook failures, outbox depth, sweep lag. See [Metrics](../guide/admin.md#metrics). |
+| `routing.healthWindowHours` | `number` | `24` | Hours of provider health counts for the success rate and `admin.providers()`. See [Provider health](#provider-health). |
+| `routing.minSamples` | `number` | `20` | Fewest samples before a rate counts. With fewer, the adapter is neutral in the ranking and the breaker does not open. |
+| `routing.breakerFailureRate` | `number` | `0.8` | The circuit breaker skips an adapter when more than this share of its quotes and starts in the last one to two hours failed. `1` turns the breaker off. |
+| `routing.breakerCooldownMinutes` | `number` | `10` | How long an open breaker skips the adapter before it lets one probe quote through |
+| `routing.breaker` | `boolean` | `true` | `false` turns the circuit breaker off. Ranking and failover still work. |
 
 The default geo lookup reads `cf-ipcountry` or `x-vercel-ip-country` (ignoring `XX`), and `x-vercel-ip-country-region` for the region (as `{country}-{region}`).
 
@@ -78,6 +83,7 @@ await openramp.admin.findByTx(chain, txHash)  // Promise<AdminSessionSummary[]>:
 await openramp.admin.stats({ since? })        // Promise<AdminStats>
 await openramp.admin.resolve(id, state, note) // Promise<AdminSession>: force a final state, with an audit note and a webhook
 await openramp.admin.replayWebhooks(id)       // Promise<{ queued: number }>
+await openramp.admin.providers()              // Promise<ProviderHealth[]>: counts, success rate, recent failure rate and breaker state per adapter
 ```
 
 `handle` never throws. Errors become JSON responses (see [HTTP routes](./http.md#errors)). It answers `OPTIONS` with `204` and the CORS headers.
@@ -126,6 +132,31 @@ A delivery can still arrive more than once, for example after a timeout. A repea
 With `admin` set, each run also removes days of the admin time index that are older than `admin.indexDays`.
 
 The server tracks only the sessions it creates. A session goes back on the open-session list after a `restart`, and when a provider event arrives for it.
+
+## Provider health
+
+The server counts, per adapter and hour, quotes that worked or failed, starts that worked or failed, and legs that succeeded or failed. The counts live in the store's KV space (one key per adapter, `health:{adapterId}`), for `routing.healthWindowHours` (default 24). A write is one read and one write with no lock: two writes at the same time can lose one update, and a store error only skips the update. A request never fails because of these counts.
+
+An error that is an answer from a working provider is not a failure: `REGION_UNSUPPORTED`, `AMOUNT_TOO_LOW`, `AMOUNT_TOO_HIGH`, `NO_QUOTES`, `QUOTE_EXPIRED`, `PROVIDER_DECLINED`, `KYC_REJECTED`, `BAD_REQUEST`, `ADDRESS_REJECTED`, `DESTINATION_NOT_ALLOWED`, `DESTINATION_LOCKED`, `CLIENT_UPGRADE_REQUIRED`, `SESSION_EXPIRED`, `CANCELED` and `CONFLICT`. Any other error, and a quote timeout, is a failure.
+
+The server uses the counts in three ways:
+
+- **Ranking.** After the delivered amount and the ETA, quotes with the same values go in the order of the recent success rate: good starts and succeeded legs, out of all starts and leg outcomes. A pathway's rate is the product of its legs' rates. An adapter with fewer than `routing.minSamples` (default 20) samples is neutral: it takes the mean rate of the rated adapters in the list. Then the planner's order decides.
+- **Circuit breaker.** When more than `routing.breakerFailureRate` (default 0.8) of an adapter's quotes and starts in the current and the previous hour failed, with at least `minSamples` of them, the breaker opens. `POST /sessions/:id/quotes` then skips every pathway with that adapter, with no network call, and adds `PROVIDER_UNAVAILABLE` to `errors`. After `routing.breakerCooldownMinutes` (default 10), one request may quote the adapter (half open). A good quote closes the breaker, and the failures from before do not count again. A failed quote opens it for one more cool-down. Turn it off with `routing.breaker: false` or `breakerFailureRate: 1`. Metrics: `breaker.opened`, `breaker.closed`, `quote.skipped`.
+- **Failover at start.** When the first leg's `start()` throws `PROVIDER_UNAVAILABLE`, a timeout, or another error with `retryable: true`, `POST /sessions/:id/select` starts the next best quote of the same quote request and method from another adapter. The quote must not have expired, and must be inside `amountBounds`. The server tries at most 2 more quotes. Each try records `payment.failover` (`{ from, to, quoteId }`) in the timeline and the metric `payment.failover`. The answer is the session, with the quote that started in `payment.quoteId`. A user error (for example `AMOUNT_TOO_LOW`, `KYC_REJECTED` or `BAD_REQUEST`) never fails over. When `start()` returned any step, the provider has an order, so the server never starts another provider for that payment. When every try fails, the answer is the first error, and the session is as it was before the select.
+
+`openramp.admin.providers()` and `GET /admin/providers` show the counts per adapter:
+
+```ts
+type ProviderHealth = {
+  adapterId: string
+  windowHours: number
+  counts: { quoteOk: number; quoteFail: number; startOk: number; startFail: number; legSucceeded: number; legFailed: number }
+  successRate: number | null        // null with fewer than minSamples starts and leg outcomes
+  recentFailureRate: number | null  // quotes and starts in the breaker window; null with fewer than minSamples
+  breaker: { state: 'closed' | 'open' | 'half_open'; openedAt?: string }
+}
+```
 
 ## CreateSessionInput
 

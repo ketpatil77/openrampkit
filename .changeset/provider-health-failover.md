@@ -1,0 +1,6 @@
+---
+'@openrampkit/server': minor
+'@openrampkit/core': minor
+---
+
+Provider health, ranking by success rate, a circuit breaker and failover at start. The server now counts, per adapter and hour, quotes that worked or failed, starts that worked or failed, and legs that succeeded or failed (best effort, in the store's KV space). Answers such as `AMOUNT_TOO_LOW` or `NO_QUOTES` are not failures. Quotes with the same output and ETA go in the order of the providers' recent success rate (`rankQuotes` takes an optional `successRate`). An adapter whose recent quotes and starts mostly fail is skipped with `PROVIDER_UNAVAILABLE` and no network call, and after a cool-down one probe quote may close the breaker again. When the chosen quote's `start()` throws a provider failure, `select` starts the next best quote of the same list (at most 2 more) and records `payment.failover`. It never fails over once `start()` returned a step. New config `routing` (`healthWindowHours` 24, `minSamples` 20, `breakerFailureRate` 0.8, `breakerCooldownMinutes` 10, `breaker`), new `openramp.admin.providers()` and `GET /admin/providers`, and new metrics `payment.failover`, `breaker.opened`, `breaker.closed` and `quote.skipped`.

@@ -13,6 +13,7 @@ import type {
   PlanResult,
   PublicSession,
   PublicQuote,
+  SourceChain,
   Step,
   Transition,
   WalletAdapter,
@@ -56,6 +57,11 @@ export type Snapshot = {
   balances: WalletBalance[]
   /** Token the user pays with, for `wallet` and `transfer` */
   source?: { chain: string; token: string; symbol?: string; decimals?: number }
+  /**
+   * Deposit: chains and tokens of the source picker for an address transfer, from the server (with
+   * logos). Undefined until it loads or when it fails: a UI then uses `defaultSourceTokens`.
+   */
+  sources?: SourceChain[]
   /** The provider page (IFRAME surface) said the user closed it. Cleared by `reopenSurface()` or a new step. */
   surfaceClosed: boolean
   /** Withdraw: the "To wallet" form */
@@ -419,6 +425,7 @@ export class RampController {
     if (isAddressTransfer(method)) {
       // No amount needed: the user sends any amount to a deposit address.
       this.set({ amount: '', screen: 'quotes' })
+      void this.loadSources(method)
       return this.refreshQuotes()
     }
     this.set({ screen: 'amount', amountSide: 'source' })
@@ -431,6 +438,20 @@ export class RampController {
     const destChain = session.destination?.type === 'crypto' ? session.destination.chain : ''
     const chain = ['eip155:42161', 'eip155:8453', 'eip155:10'].find((c) => c !== destChain) ?? 'eip155:42161'
     return { chain, token: USDC[chain]!, symbol: 'USDC', decimals: 6 }
+  }
+
+  private sourcesFor?: string
+
+  /** Load the source picker list for a method once. On an error the picker keeps the default list. */
+  async loadSources(method: string) {
+    if (this.sourcesFor === method && this.snap.sources) return
+    this.sourcesFor = method
+    try {
+      const { chains } = await this.opts.client.sources(this.opts.clientSecret, method)
+      if (!this.destroyed && this.sourcesFor === method && Array.isArray(chains)) this.set({ sources: chains })
+    } catch {
+      if (this.sourcesFor === method) this.sourcesFor = undefined
+    }
   }
 
   setSource(source: NonNullable<Snapshot['source']>) {

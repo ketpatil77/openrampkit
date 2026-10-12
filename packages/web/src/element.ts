@@ -4,7 +4,7 @@ import type { PropertyValues, TemplateResult } from 'lit'
 import { live } from 'lit/directives/live.js'
 import { isValidTargetAddress } from '@openrampkit/client'
 import type { DepositController, Snapshot, Tab } from '@openrampkit/client'
-import { isAddressTransfer, isWebUrl, methodName } from '@openrampkit/core'
+import { isAddressTransfer, isWebUrl, methodName, searchSourceTokens, sourceTokenKey } from '@openrampkit/core'
 import type { FieldSpec, MethodOption, OpenRampError, Payment, PublicQuote, Step, Surface, Transition } from '@openrampkit/core'
 import { displayChain, formatAmount, formatCountdown, formatEta, formatFiat, formatToken, shortAddress, titleCase } from './format.js'
 import { icons, methodIcon } from './icons.js'
@@ -35,6 +35,7 @@ import {
   transferChains,
   transferTokens,
 } from './view.js'
+import type { TokenOption } from './view.js'
 
 export const TAG_NAME = 'openramp-modal'
 
@@ -120,6 +121,9 @@ export class OpenRampModal extends LitElement {
   private _listening = false
   private _docKeys = false
   private _sdkMounted: string | undefined
+  /** Transfer source picker: the token list is open, and its search text */
+  private _tokenOpen = false
+  private _tokenQuery = ''
   private _sdkCleanup: (() => void) | undefined
 
   constructor() {
@@ -809,25 +813,67 @@ export class OpenRampModal extends LitElement {
   private _renderTransferSource(m: Messages, s: Snapshot) {
     const c = this.controller!
     const src = s.source
-    const chains = transferChains(src?.chain)
-    const setChain = (chain: string) => c.setSource(sourceForChain(chain, src?.token === 'native'))
-    const setToken = (token: string) => {
-      if (!src) return
-      const o = transferTokens(src.chain).find((x) => x.token === token)
-      if (o) c.setSource({ chain: src.chain, ...o })
+    const chains = transferChains(src?.chain, s.sources)
+    const setChain = (chain: string) => {
+      this._tokenQuery = ''
+      c.setSource(sourceForChain(chain, src?.token === 'native', s.sources))
     }
+    const tokens = src ? transferTokens(src.chain, s.sources) : []
+    const current = src ? (tokens.find((o) => sameTokenId(src.chain, o.token, src.token)) ?? { ...src, symbol: src.symbol ?? '?', decimals: src.decimals ?? 18 }) : undefined
+    const pick = (o: TokenOption) => {
+      this._tokenOpen = false
+      this._tokenQuery = ''
+      c.setSource({ chain: o.chain, token: o.token, symbol: o.symbol, decimals: o.decimals })
+    }
+    const found = searchSourceTokens(tokens, this._tokenQuery)
     return html`
       <span class="field-label" id="ork-sendfrom">${m.sendFrom}</span>
       <div class="select-row" role="group" aria-labelledby="ork-sendfrom">
-        <select class="input" aria-label=${m.network} @change=${(e: Event) => setChain((e.target as HTMLSelectElement).value)}>
-          ${chains.map((ch) => html`<option value=${ch} ?selected=${src?.chain === ch}>${displayChain(ch)}</option>`)}
-        </select>
-        <select class="input" aria-label=${m.token} @change=${(e: Event) => setToken((e.target as HTMLSelectElement).value)}>
-          ${src
-            ? transferTokens(src.chain).map((o) => html`<option value=${o.token} ?selected=${src.token === o.token}>${o.symbol}</option>`)
-            : nothing}
-        </select>
+        ${chainSelect(m.network, chains, src?.chain, setChain)}
+        <button
+          class="input token-btn"
+          type="button"
+          aria-label=${m.token}
+          aria-expanded=${this._tokenOpen ? 'true' : 'false'}
+          aria-controls="ork-token-panel"
+          ?disabled=${!src}
+          @click=${() => {
+            this._tokenOpen = !this._tokenOpen
+            this.requestUpdate()
+          }}
+        >
+          ${current ? html`${tokenLogo(current)}<span class="token-btn-symbol">${current.symbol}</span>` : nothing}
+        </button>
       </div>
+      ${this._tokenOpen && src
+        ? html`<div class="token-panel" id="ork-token-panel">
+            ${tokens.length > 6
+              ? html`<input
+                  class="input"
+                  type="search"
+                  aria-label=${m.searchTokens}
+                  placeholder=${m.searchTokens}
+                  .value=${this._tokenQuery}
+                  @input=${(e: Event) => {
+                    this._tokenQuery = (e.target as HTMLInputElement).value
+                    this.requestUpdate()
+                  }}
+                />`
+              : nothing}
+            <div class="rows token-list" role="radiogroup" aria-label=${m.token}>
+              ${found.map(
+                (o) => html`<button class="row" type="button" role="radio" aria-checked=${sameTokenId(src.chain, o.token, src.token) ? 'true' : 'false'} @click=${() => pick(o)}>
+                  <span class="row-icon">${tokenLogo(o)}</span>
+                  <span class="row-main">
+                    <span class="row-title">${o.symbol}</span>
+                    ${o.name ? html`<span class="row-sub">${o.name}</span>` : nothing}
+                  </span>
+                </button>`,
+              )}
+              ${found.length ? nothing : html`<div class="hint">${m.noTokenFound}</div>`}
+            </div>
+          </div>`
+        : nothing}
     `
   }
 
@@ -1249,6 +1295,41 @@ function restoreFocus(el: HTMLElement, tries = 5) {
     const active = document.activeElement
     if (!active || active === document.body) restoreFocus(el, tries - 1)
   }, 20)
+}
+
+/**
+ * A token logo over the first letter of the symbol. A logo that does not load (or that the page's CSP
+ * blocks) is hidden, so the letter shows.
+ */
+function tokenLogo(t: { symbol: string; logoUrl?: string }): TemplateResult {
+  const logo = t.logoUrl && isWebUrl(t.logoUrl) ? t.logoUrl : undefined
+  return html`<span class="token-logo" aria-hidden="true" data-letter=${t.symbol.slice(0, 1).toUpperCase()}>
+    ${logo
+      ? html`<img
+          src=${logo}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+          @load=${(e: Event) => ((e.target as HTMLImageElement).hidden = false)}
+          @error=${(e: Event) => ((e.target as HTMLImageElement).hidden = true)}
+        />`
+      : nothing}
+  </span>`
+}
+
+/**
+ * The network select of the source picker, in its own template: the happy-dom parser (tests) moves the
+ * part marker out of a <select> and then miscounts the bindings that follow it in the same template.
+ */
+function chainSelect(label: string, chains: string[], selected: string | undefined, onChange: (chain: string) => void): TemplateResult {
+  return html`<select class="input" aria-label=${label} @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}>
+    ${chains.map((ch) => html`<option value=${ch} ?selected=${selected === ch}>${displayChain(ch)}</option>`)}
+  </select>`
+}
+
+function sameTokenId(chain: string, a: string, b: string): boolean {
+  return sourceTokenKey(chain, a) === sourceTokenKey(chain, b)
 }
 
 function dedupe(list: string[]): string[] {

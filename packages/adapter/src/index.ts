@@ -9,6 +9,7 @@ import type {
   LegSpec,
   LegStep,
   PathwayLeg,
+  SourceToken,
 } from '@openrampkit/core'
 import { bytesToBase64, bytesToHex } from './util.js'
 
@@ -131,6 +132,12 @@ export interface Adapter {
   readonly env?: AdapterEnv
   /** Static leg declarations */
   legs: LegSpec[]
+  /**
+   * Optional: tokens the user can pay with on `chains` for a deposit method (`transfer`,
+   * `exchange_transfer` or `wallet`), most popular first. The server caches the list for some hours and
+   * adds the default tokens (USDC and native). It only fills the picker: the quote decides what is valid.
+   */
+  sourceTokens?(input: { chains: string[]; method: string }, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<SourceToken[]>
   /** Optional live catalog: returns legs refined for this user (methods, limits, assets) */
   catalog?(input: CatalogInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<LegSpec[]>
   quote(input: QuoteInput, ctx: AdapterContext): Promise<LegQuote>

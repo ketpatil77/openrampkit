@@ -43,6 +43,8 @@ export const ms: Messages = {
   sendFrom: 'Hantar dari',
   network: 'Rangkaian',
   token: 'Token',
+  searchTokens: 'Cari token',
+  noTokenFound: 'Tiada token ditemui',
   youGet: 'Anda terima',
   youPay: (amount) => `Anda bayar ${amount}`,
   fees: (amount) => `Caj ${amount}`,

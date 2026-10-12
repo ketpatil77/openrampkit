@@ -44,6 +44,8 @@ export const fil: Messages = {
   sendFrom: 'Ipadala mula sa',
   network: 'Network',
   token: 'Token',
+  searchTokens: 'Maghanap ng token',
+  noTokenFound: 'Walang nakitang token',
   youGet: 'Matatanggap mo',
   youPay: (amount) => `Babayaran mo ang ${amount}`,
   fees: (amount) => `Singil ${amount}`,

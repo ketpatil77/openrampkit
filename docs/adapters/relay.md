@@ -92,6 +92,10 @@ In a [withdraw session](../guide/withdraw.md), the `wallet` leg sends the sessio
 - The bridge leg starts as `processing` with the detail code `waiting_for_deposit`, and completes when Relay reports the request as `success`.
 - The expected deposit is the input of the bridge quote. The tolerance is at least 5%, because the onramp can deliver a little less than its quote.
 
+## Source tokens
+
+`sourceTokens()` gives the deposit picker Relay's default list of verified tokens for each chain (`POST /currencies/v2` with `defaultList` and `verified`). For `transfer` and `exchange_transfer` it asks only for tokens that Relay accepts on a deposit address (`depositAddressOnly`). Each chain's list is cached for 6 hours. A chain that fails is left out, and the server still shows USDC and the native token there.
+
 ## Quotes and fees
 
 | Quote | Guarantee | Notes |

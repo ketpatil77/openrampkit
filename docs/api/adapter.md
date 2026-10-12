@@ -22,6 +22,7 @@ interface Adapter {
   readonly env?: 'sandbox' | 'production'   // AdapterEnv. Undefined: follows each session's livemode
   legs: LegSpec[]
   catalog?(input: CatalogInput, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<LegSpec[]>
+  sourceTokens?(input: { chains: string[]; method: string }, ctx: Pick<AdapterContext, 'fetch' | 'log' | 'shared'>): Promise<SourceToken[]>
   quote(input: QuoteInput, ctx: AdapterContext): Promise<LegQuote>
   prepareDeposit?(input: { leg: PathwayLeg; amountIn?: Amount }, ctx: AdapterContext):
     Promise<{ address: string; ref?: string; data?: Record<string, unknown> }>
@@ -53,6 +54,7 @@ interface Adapter {
 | `status` | `GET /step` (at most every 2 s per leg), `sweep()` and `sessions.refresh()` |
 | `webhook` | `POST /webhooks/:adapterId` |
 | `health` | `GET /health?deep=1` with the tasks token (plain `GET /health` does not call adapters) |
+| `sourceTokens` | `GET /sessions/:id/sources`, with `{ chains, method }`. Return the tokens the user can pay with, most popular first. The server checks and caches them. |
 | `routes` | Any request to `/adapters/:adapterId/*` |
 
 `resultChannels(adapter)` returns `{ polling, webhooks }`: `polling` is true when the adapter has `status()`, and `webhooks` is true when it has a `webhook` whose `configured` is not `false`. The server uses it at start. It writes one warning for each adapter with legs that has neither, because the payments of that adapter cannot complete. Leg capabilities do not say how results arrive: `LegSpec.capabilities` has only `settlement` and `surface_after_processing`.

@@ -11,6 +11,7 @@ You rarely call these yourself: `@openrampkit/client` does. They are listed here
 | `POST` | `/sessions` | `authorize` hook, `Idempotency-Key` | Create a session (only when `authorize` is set) |
 | `GET` | `/sessions/:id` | Bearer client secret | Read the session |
 | `GET` | `/sessions/:id/step` | Bearer | Read the session after a status check |
+| `GET` | `/sessions/:id/sources?method=` | Bearer | Deposit: chains and tokens for the source picker |
 | `POST` | `/sessions/:id/plan` | Bearer | Plan pathways and methods |
 | `POST` | `/sessions/:id/target` | Bearer | Withdraw: set the target the user picked, and plan |
 | `POST` | `/sessions/:id/quotes` | Bearer | Quote a method |
@@ -111,6 +112,20 @@ See [`Payment`](./core.md#payment) and [`SessionResult`](./core.md#sessionresult
 ## GET /sessions/:id/step
 
 Same response as `GET /sessions/:id`. Before answering, the server asks the active leg's adapter for status (`status()`), at most once every 2 seconds per leg. This is the route the client polls.
+
+## GET /sessions/:id/sources
+
+Query: `method` is `transfer` (default), `exchange_transfer` or `wallet`. A withdrawal gets `409`, because its source is fixed.
+
+The server asks each adapter that offers the method and has `sourceTokens()`, and adds the default tokens of each chain (USDC, then the native token). It drops tokens with fields that are not valid, and it keeps a logo only when it is an `https` URL. It caches the list for an hour when every adapter answered. An adapter that fails or takes more than 5 seconds is left out.
+
+Response `200`:
+
+```json
+{ "chains": [{ "chain": "eip155:42161", "name": "Arbitrum", "tokens": [{ "chain": "eip155:42161", "token": "0xaf88...", "symbol": "USDC", "decimals": 6, "name": "USD Coin", "logoUrl": "https://..." }] }] }
+```
+
+The list fills the picker only. It does not limit what the user can pay with: the quote decides that. A UI must show a fallback when a logo does not load (for example when the page's CSP blocks it).
 
 ## POST /sessions/:id/plan
 

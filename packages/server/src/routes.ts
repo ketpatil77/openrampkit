@@ -14,6 +14,7 @@ import { trackOpenSession } from './queue.js'
 import { adapterContext, publicSession } from './runtime.js'
 import type { Runtime } from './runtime.js'
 import { cancelSession, createSession, loadAuthed } from './sessions.js'
+import { sourcesRoute } from './sources.js'
 import { createPayLink, isPayCredential, payRoute, revokeOn } from './pay.js'
 import { sweep } from './tasks.js'
 import { adminRoute } from './admin.js'
@@ -145,6 +146,8 @@ async function sessionAction(rt: Runtime, req: Request, rec: SessionRecord, meth
   if (method === 'POST' && action !== 'pay-link' && isFinalStatus(rec.status) && rec.status !== 'expired') {
     return errorResponse(openRampError('BAD_REQUEST', { message: finalMessage(rec) }), 409)
   }
+
+  if (action === 'sources' && method === 'GET') return sourcesRoute(rt, req, rec)
 
   if (action === 'step' && method === 'GET') {
     if (await refreshActive(rt, rec)) await saveSession(rt, rec)

@@ -44,6 +44,8 @@ export const th: Messages = {
   sendFrom: 'ส่งจาก',
   network: 'เครือข่าย',
   token: 'โทเคน',
+  searchTokens: 'ค้นหาโทเคน',
+  noTokenFound: 'ไม่พบโทเคน',
   youGet: 'คุณได้รับ',
   youPay: (amount) => `คุณจ่าย ${amount}`,
   fees: (amount) => `ค่าธรรมเนียม ${amount}`,

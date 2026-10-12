@@ -43,6 +43,8 @@ export const vi: Messages = {
   sendFrom: 'Gửi từ',
   network: 'Mạng',
   token: 'Token',
+  searchTokens: 'Tìm token',
+  noTokenFound: 'Không tìm thấy token',
   youGet: 'Bạn nhận',
   youPay: (amount) => `Bạn trả ${amount}`,
   fees: (amount) => `Phí ${amount}`,

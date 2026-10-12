@@ -51,6 +51,8 @@ export const en = {
   sendFrom: 'Send from',
   network: 'Network',
   token: 'Token',
+  searchTokens: 'Search tokens',
+  noTokenFound: 'No token found',
   youGet: 'You get',
   youPay: (amount: string) => `You pay ${amount}`,
   fees: (amount: string) => `Fees ${amount}`,

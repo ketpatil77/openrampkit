@@ -388,9 +388,7 @@ describe('payment steps (real server)', () => {
     expect(h.$('[data-method="vietqr"]')).not.toBeNull()
   })
 
-  // happy-dom limit: the transfer quotes screen has two sibling <select>s, which the happy-dom 18 parser
-  // cannot handle (Lit reports "duplicate attribute bindings"). The element stays hidden on that screen;
-  // view.test.ts covers the picker logic.
+  // The element stays hidden on the quotes screen here; the source picker test above renders it.
   it('DEPOSIT_ADDRESS step: address, network, token, warning, copy, simulate deposit', async () => {
     const h = await mount({ country: 'US' })
     h.el.open = false
@@ -421,12 +419,31 @@ describe('payment steps (real server)', () => {
     expect(h.$('.result-title')!.textContent).toBe('Deposit complete')
   })
 
+  it('transfer source picker: one network select and a token list with logo letters', async () => {
+    const h = await mount({ country: 'US' })
+    await h.c.selectMethod('transfer')
+    h.c.setSource({ chain: 'eip155:10', token: USDC['eip155:10']!, symbol: 'USDC', decimals: 6 })
+    await h.until(() => !h.c.getSnapshot().quotesLoading)
+    await settle(h.el)
+    const btn = h.$('.token-btn')!
+    expect(btn.textContent).toContain('USDC')
+    expect(btn.getAttribute('aria-expanded')).toBe('false')
+    await h.click(btn)
+    expect(h.$('.token-btn')!.getAttribute('aria-expanded')).toBe('true')
+    const rows = h.$$('.token-list .row')
+    expect(rows.map((r) => r.querySelector('.row-title')!.textContent)).toEqual(['USDC', 'ETH'])
+    expect(rows[0]!.getAttribute('aria-checked')).toBe('true')
+    expect(h.$$('.token-list .token-logo').map((l) => l.getAttribute('data-letter'))).toEqual(['U', 'E'])
+    await h.click(rows[1]!)
+    expect(h.c.getSnapshot().source).toMatchObject({ chain: 'eip155:10', token: 'native', symbol: 'ETH', decimals: 18 })
+    expect(h.$('.token-panel')).toBeNull()
+  })
+
   it('exchange_transfer: own title, exchange examples on the deposit address step, simulate deposit', async () => {
     const h = await mount({ country: 'VN', mock: { settleMs: 0, crypto: true, bridge: true, exchange: true } })
     h.c.setTab('crypto')
     await settle(h.el)
     expect(h.$('[data-method="exchange_transfer"]')!.textContent).toContain('From an exchange')
-    // The send-from picker has two sibling selects, which the happy-dom parser cannot render (see the transfer test above)
     h.el.open = false
     await settle(h.el)
     await h.c.selectMethod('exchange_transfer')

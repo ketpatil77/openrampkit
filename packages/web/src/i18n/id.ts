@@ -43,6 +43,8 @@ export const id: Messages = {
   sendFrom: 'Kirim dari',
   network: 'Jaringan',
   token: 'Token',
+  searchTokens: 'Cari token',
+  noTokenFound: 'Token tidak ditemukan',
   youGet: 'Anda terima',
   youPay: (amount) => `Anda bayar ${amount}`,
   fees: (amount) => `Biaya ${amount}`,

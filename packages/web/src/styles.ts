@@ -506,6 +506,58 @@ export const styles = css`
   .input:focus {
     border-color: var(--ork-color-accent);
   }
+  .token-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding-top: 0;
+    padding-bottom: 0;
+    text-align: left;
+    cursor: pointer;
+  }
+  .token-btn-symbol {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .token-logo {
+    position: relative;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--ork-color-background);
+    color: var(--ork-color-text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .token-logo::before {
+    content: attr(data-letter);
+  }
+  .token-logo img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .token-logo img[hidden] {
+    display: none;
+  }
+  .token-panel {
+    display: grid;
+    gap: 8px;
+    margin: -6px 0 14px;
+  }
+  .token-list {
+    max-height: 240px;
+    overflow-y: auto;
+  }
   .input.mono {
     font-family: var(--ork-font-mono);
     font-size: 14px;

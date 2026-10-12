@@ -23,6 +23,7 @@ import { depositAddresses } from './deposit-address.js'
 import { directTransfer } from './direct-transfer.js'
 import { POLL_TRANSITION, addrKey, awaitingTx, cryptoAsset, deliveredOutput, destAsset, isSolana, recipientOf, relayStep, relayTransactions, requestIdFromRef, toOpenRamp } from './helpers.js'
 import { quotes, relayLegs } from './quotes.js'
+import { relaySources } from './sources.js'
 import type { DepositRecord, RelayIntentStatus, WalletRecord } from './types.js'
 import { walletLeg } from './wallet.js'
 
@@ -44,6 +45,7 @@ export function relay(opts: RelayOptions = {}) {
   const { startWallet, verifyDirectWallet, verifySettlementWallet } = walletLeg(rt)
   const { findDirectDeposit } = direct
   const { openDepositAddress, depositRef, startDeposit, findRelayDeposit } = deposits
+  const { sourceTokens } = relaySources(rt)
 
   /**
    * What a completed wallet request delivered, from Relay's request (`GET /requests/v3?id=`). The
@@ -66,6 +68,7 @@ export function relay(opts: RelayOptions = {}) {
     // Relay has no sandbox: the testnets API (api.testnets.relay.link) is the test environment.
     env: /testnets/.test(opts.baseUrl ?? '') ? 'sandbox' : 'production',
     legs,
+    sourceTokens,
 
     async quote(input, ctx) {
       warnNoKey(ctx.log)

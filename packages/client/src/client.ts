@@ -1,7 +1,7 @@
 // HTTP client for the app's OpenRampKit server handler.
 
 import { openRampError } from '@openrampkit/core'
-import type { OpenRampError, PlanResult, PublicQuote, PublicSession } from '@openrampkit/core'
+import type { OpenRampError, PlanResult, PublicQuote, PublicSession, SourceChain } from '@openrampkit/core'
 
 export type ClientOptions = {
   /** Base URL of the OpenRampKit server handler, e.g. `/api/openramp` or `https://ramp.example.workers.dev` */
@@ -89,6 +89,9 @@ export function createOpenRampClient(opts: ClientOptions) {
     transition: (secret: string, name: string, inputs?: Record<string, unknown>) =>
       call<PublicSession>(secret, 'POST', `/sessions/${sessionId(secret)}/transitions/${encodeURIComponent(name)}`, { inputs: inputs ?? {} }, idemKey()),
     step: (secret: string) => call<PublicSession>(secret, 'GET', `/sessions/${sessionId(secret)}/step`),
+    /** Deposit: chains and tokens for the source picker of a method (`transfer`, `exchange_transfer` or `wallet`) */
+    sources: (secret: string, method: string) =>
+      call<{ chains: SourceChain[] }>(secret, 'GET', `/sessions/${sessionId(secret)}/sources?method=${encodeURIComponent(method)}`),
     /** Cancel the session while no payment is under way (`POST /sessions/:id/cancel`) */
     cancel: (secret: string) => call<PublicSession>(secret, 'POST', `/sessions/${sessionId(secret)}/cancel`, {}, idemKey()),
   }

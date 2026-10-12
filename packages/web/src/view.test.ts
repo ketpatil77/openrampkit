@@ -201,14 +201,25 @@ describe('transfer source picker', () => {
   })
 
   it('transferTokens offers USDC when known and the native token', () => {
-    expect(transferTokens('eip155:137')).toEqual([
+    expect(transferTokens('eip155:137').map(({ token, symbol, decimals }) => ({ token, symbol, decimals }))).toEqual([
       { token: USDC['eip155:137'], symbol: 'USDC', decimals: 6 },
       { token: 'native', symbol: 'POL', decimals: 18 },
     ])
-    expect(transferTokens('eip155:143')).toEqual([{ token: 'native', symbol: 'MON', decimals: 18 }])
-    expect(transferTokens('eip155:777')).toEqual([{ token: 'native', symbol: 'ETH', decimals: 18 }])
+    expect(transferTokens('eip155:143')).toEqual([{ chain: 'eip155:143', token: 'native', symbol: 'MON', decimals: 18 }])
+    expect(transferTokens('eip155:777')).toEqual([{ chain: 'eip155:777', token: 'native', symbol: 'ETH', decimals: 18 }])
     // SOL has 9 decimals, not 18
-    expect(transferTokens(SOLANA_MAINNET).find((o) => o.token === 'native')).toEqual({ token: 'native', symbol: 'SOL', decimals: 9 })
+    expect(transferTokens(SOLANA_MAINNET).find((o) => o.token === 'native')).toMatchObject({ token: 'native', symbol: 'SOL', decimals: 9 })
+  })
+
+  it('the server list replaces the defaults: its chains, its tokens, and the current chain when missing', () => {
+    const usdt = { chain: 'eip155:42161', token: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9', symbol: 'USDT', decimals: 6 }
+    const sources = [{ chain: 'eip155:42161', name: 'Arbitrum', tokens: [usdt] }]
+    expect(transferChains(undefined, sources)).toEqual(['eip155:42161'])
+    expect(transferChains('eip155:8453', sources)).toEqual(['eip155:42161', 'eip155:8453'])
+    expect(transferTokens('eip155:42161', sources)).toEqual([usdt])
+    // a chain the list does not have keeps the defaults
+    expect(transferTokens('eip155:8453', sources).map((t) => t.symbol)).toEqual(['USDC', 'ETH'])
+    expect(sourceForChain('eip155:42161', false, sources)).toEqual({ chain: 'eip155:42161', token: usdt.token, symbol: 'USDT', decimals: 6 })
   })
 
   it('sourceForChain keeps native, else picks the first token', () => {

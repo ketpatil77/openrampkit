@@ -1,8 +1,8 @@
 // Pure view logic for <openramp-modal>. No Lit and no DOM here, so it is easy to test.
 
 import type { Snapshot } from '@openrampkit/client'
-import { CHAINS, USDC, isStepDetailCode, mulRatio } from '@openrampkit/core'
-import type { IframeMessages, MethodOption, OpenRampError, PathwayGroup, PaymentLeg, PublicQuote, Step, Surface, WalletBalance } from '@openrampkit/core'
+import { CHAINS, USDC, defaultSourceChains, defaultSourceTokens, isStepDetailCode, mulRatio } from '@openrampkit/core'
+import type { IframeMessages, MethodOption, OpenRampError, PathwayGroup, PaymentLeg, PublicQuote, SourceChain, SourceToken, Step, Surface, WalletBalance } from '@openrampkit/core'
 import { currencySymbol, formatAmount, formatFees, formatFiat, formatLimit, hasUnstatedFee, presetAmounts, shortAddress, titleCase } from './format.js'
 import type { Messages } from './messages.js'
 import type { Appearance, Theme } from './theme.js'
@@ -193,28 +193,26 @@ export function nextQuoteId(quotes: PublicQuote[], selectedId: string | undefine
   return quotes[(i + dir + quotes.length) % quotes.length]?.id
 }
 
-export type TokenOption = { token: string; symbol: string; decimals: number }
+export type TokenOption = SourceToken
 
-/** Networks for the transfer source picker: every chain with USDC, plus the current source chain. */
-export function transferChains(sourceChain: string | undefined): string[] {
-  const chains = Object.keys(USDC)
+/** Networks for the transfer source picker: the server list (else every chain with USDC), plus the current source chain. */
+export function transferChains(sourceChain: string | undefined, sources?: SourceChain[]): string[] {
+  const chains = sources?.length ? sources.map((c) => c.chain) : defaultSourceChains()
   if (sourceChain && !chains.includes(sourceChain)) chains.push(sourceChain)
   return chains
 }
 
-/** Tokens for the transfer source picker on one chain: USDC when known, and the native token. */
-export function transferTokens(chain: string): TokenOption[] {
-  return [
-    ...(USDC[chain] ? [{ token: USDC[chain]!, symbol: 'USDC', decimals: 6 }] : []),
-    { token: 'native', symbol: CHAINS[chain]?.nativeSymbol ?? 'ETH', decimals: CHAINS[chain]?.nativeDecimals ?? 18 },
-  ]
+/** Tokens for the transfer source picker on one chain: the server list, else USDC when known and the native token. */
+export function transferTokens(chain: string, sources?: SourceChain[]): TokenOption[] {
+  const listed = sources?.find((c) => c.chain === chain)?.tokens
+  return listed?.length ? listed : defaultSourceTokens(chain)
 }
 
 /** Source after a network change: keep "native" when it was native, else the first token. */
-export function sourceForChain(chain: string, wasNative: boolean): TokenOption & { chain: string } {
-  const opts = transferTokens(chain)
+export function sourceForChain(chain: string, wasNative: boolean, sources?: SourceChain[]): { chain: string; token: string; symbol: string; decimals: number } {
+  const opts = transferTokens(chain, sources)
   const next = (wasNative ? opts.find((o) => o.token === 'native') : opts[0]) ?? opts[0]!
-  return { chain, ...next }
+  return { chain, token: next.token, symbol: next.symbol, decimals: next.decimals }
 }
 
 // ---------- provider iframe messages ----------

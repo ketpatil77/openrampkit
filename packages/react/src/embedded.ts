@@ -32,7 +32,7 @@ export type OpenRampEmbeddedProps = {
   style?: CSSProperties
 }
 
-/** Renders `<openramp-modal embedded>` inline (no overlay), like D0's embedded mode. */
+/** Renders `<openramp-modal embedded>` inline (no overlay). */
 export function OpenRampEmbedded(props: OpenRampEmbeddedProps) {
   const ctx = useOpenRampConfig()
   const ref = useRef<OpenRampModal | null>(null)

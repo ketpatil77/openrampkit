@@ -22,7 +22,7 @@ The owner approved these decisions.
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Session status names | The Stripe and Daimo names: `requires_payment_method`, `requires_action`, `processing`, `succeeded`, `failed`, `canceled`, `expired`, `refunded`, `reversed`. `succeeded` for sessions, legs and events. The leg status `awaiting_user` is `requires_action`. `Step.state` keeps its upper case phase names, plus `CANCELED`. |
+| 1 | Session status names | The Stripe names: `requires_payment_method`, `requires_action`, `processing`, `succeeded`, `failed`, `canceled`, `expired`, `refunded`, `reversed`. `succeeded` for sessions, legs and events. The leg status `awaiting_user` is `requires_action`. `Step.state` keeps its upper case phase names, plus `CANCELED`. |
 | 2 | Failed attempts | `failed` is final. A failed attempt sends `session.payment_failed`, sets `lastError`, and returns the session to `requires_payment_method`. `session.failed` only when the session ends. Nothing follows `session.failed`. |
 | 3 | Renames | `Ork*` is `OpenRamp*` (`OpenRampError`, `OpenRampException`, `openRampError()`). `Amount.amount` is `Amount.value`. Internal ids (`ors_`, `evt_`, `ork_` provider refs) do not change. |
 | 4 | Webhooks | Standard Webhooks headers and signatures. A typed `WebhookEvent` union, a separate `ClientEvent` union, `apiVersion` (an integer, 1) and an ISO `createdAt` on every event. One `session.*` catalog: no `withdrawal.*` events. Webhooks carry the backend session view. |
@@ -273,7 +273,6 @@ Left for later:
 Fetched on 2026-10-09.
 
 - Stripe: [PaymentIntent lifecycle](https://docs.stripe.com/payments/paymentintents/lifecycle), [idempotent requests](https://docs.stripe.com/api/idempotent_requests), [webhooks](https://docs.stripe.com/webhooks)
-- Daimo: [sessions](https://docs.daimo.com/guides/sessions.md), [webhooks](https://docs.daimo.com/guides/webhooks.md)
 - Standard Webhooks: [site](https://www.standardwebhooks.com), [specification](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md)
 - Bridge: [transfer states](https://apidocs.bridge.xyz/platform/orchestration/transfers/transfer-states.md), [idempotence](https://apidocs.bridge.xyz/api-reference/introduction/idempotence.md)
 - Meld: [transaction statuses](https://docs.meld.io/docs/stablecoins/for-all-products/transaction-statuses.md)

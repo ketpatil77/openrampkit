@@ -476,7 +476,7 @@ Next:
 - A React Native package, and more wallet adapters (Privy).
 - Deploy `OpenRampSettlement` to mainnets behind a multisig, after an external review.
 
-Design notes: [scope](docs/design/scope.md), [spec](docs/design/spec.md), [market landscape](docs/design/landscape.md).
+Design notes: [scope](docs/design/scope.md), [spec](docs/design/spec.md).
 
 ## Contributing
 

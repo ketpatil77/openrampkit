@@ -37,13 +37,13 @@ Read in this order: this page, then [Quick start (Next.js)](./quick-start-nextjs
 
 ## When to use it
 
-OpenRampKit is not the only way to add deposits. Hosted players such as fun.xyz and Unifold give you one API key, one contract and a managed backend. See [Why OpenRampKit?](./why.md) for how we compare.
+OpenRampKit is not the only way to add deposits. Hosted vendors give you one API key, one contract and a managed backend. See [Why OpenRampKit?](./why.md) for how we compare.
 
 | You want | Choose |
 |---|---|
-| No provider contracts, one bill, the vendor handles provider onboarding | A hosted player (fun.xyz, Unifold, D0) |
+| No provider contracts, one bill, the vendor handles provider onboarding | A hosted vendor |
 | Your own provider keys, no platform fee, your own server and data | OpenRampKit |
-| Local rails in Southeast Asia (QRIS, QR Ph, PromptPay, VietQR, GCash, MoMo) next to cards | OpenRampKit (the hosted players cover few of these) |
+| Local rails in Southeast Asia (QRIS, QR Ph, PromptPay, VietQR, GCash, MoMo) next to cards | OpenRampKit (hosted vendors cover few of these) |
 | Fiat into your own merchant account, no crypto at all | OpenRampKit with the [Xendit adapter](../adapters/xendit.md) |
 | A provider that nobody supports yet | OpenRampKit: [write an adapter](../adapters/writing-an-adapter.md) |
 

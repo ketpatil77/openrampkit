@@ -6,7 +6,6 @@ Status: research done, scope set, spec written ([spec](./spec.md)). No code yet.
 
 Related:
 - [Spec](./spec.md): detailed spec and phased implementation plan
-- [Landscape](./landscape.md): market research and competitor teardowns
 - [Data model for 0.1.0](./data-model-0.1.md): statuses, webhooks, externalId, idempotency and cancel
 
 ---
@@ -18,7 +17,7 @@ Every app that holds a user balance needs a "Deposit" button and a "Withdraw" bu
 - Each rail is a separate integration: card onramps (MoonPay, Transak, Stripe, Coinbase), bank transfer, local QR (QRIS, PromptPay, QRPh, DuitNow, VietQR), e-wallets (GCash, MoMo, GoPay), exchange connect, wallet transfer and deposit address.
 - Each provider has its own KYC flow, region rules, limits, quote format, surface (redirect, iframe, SDK, QR) and webhook format.
 - No single onramp covers the world. Coverage, price and approval rates change by country and by method.
-- In emerging markets, cards do not work. Card ownership is 3% in PH, 4.6% in IN, 5.8% in VN and 5.9% in ID (D0, Aug 2026). People pay with local QR codes and e-wallets.
+- In emerging markets, cards do not work. Card ownership is 3% in PH, 4.6% in IN, 5.8% in VN and 5.9% in ID (industry data, Aug 2026). People pay with local QR codes and e-wallets.
 - Many target chains are not listed by any onramp. The only way to reach them is to buy on a listed chain and bridge (the "hop").
 
 ## 2. Market
@@ -26,18 +25,10 @@ Every app that holds a user balance needs a "Deposit" button and a "Withdraw" bu
 The industry has three layers (Harry Alford, Monad Foundation, "The Deposit Stack, Explained for Founders", Sep 2026):
 
 1. **Fiat onramps** (licensed, fiat to crypto): Swapped, Transak, MoonPay, Coinbase, Stripe. Aggregators: Onramper, Meld.
-2. **Crypto deposit** (crypto to crypto): Relay, LI.FI, Blink, Daimo Pay.
-3. **Unified deposit** (one integration for the whole flow): fun.xyz, Unifold, Calm, D0, Privy funding.
+2. **Crypto deposit** (crypto to crypto): Relay, LI.FI.
+3. **Unified deposit** (one integration for the whole flow): hosted vendors that combine both layers behind one API key.
 
-OpenRampKit is a layer-3 product with a different model: open source, self-hosted, and with the app's own provider keys.
-
-| Unified player | Model | Open? | Fee | SEA local rails | Fiat out |
-|---|---|---|---|---|---|
-| fun.xyz | Hosted. RainbowKit fork. Polymarket, Lighter, Ostium | npm "MIT", repo private | bps app fee on each Relay route | Via Swapped | Via Swapped |
-| Unifold (YC W26) | Hosted. Deposit addresses + hop. React, RN, Solid, Svelte, web | npm MIT / Apache-2.0, repo private | `platform_fee_percent` on each deposit | None | None |
-| D0 | Hosted cashier. Merchant server creates the session | UNLICENSED | Not public | QRPh, PromptPay, DuitNow, QRIS | Yes |
-| Privy | Inside the Privy wallet SDK. Stripe + Meld/MoonPay/Coinbase | No | Not public | Via Meld | Yes |
-| Blink | Crypto deposit only | npm MIT, repo private | 0.33 to 1 bp | None | No |
+OpenRampKit is a layer-3 product with a different model: open source, self-hosted, and with the app's own provider keys. Hosted layer-3 vendors usually take a fee on each deposit, keep the provider contracts, and cover few Southeast Asian rails or fiat payouts.
 
 **The gap:** no one offers a provider-neutral deposit and withdraw kit that is open source, self-hosted, works with any wallet stack (or none), and has SEA rails and merchant fiat accounts built in.
 
@@ -64,32 +55,32 @@ Four key ideas:
 3. **Wallet and infra teams** that want a ramp without adopting a whole vendor stack.
 4. **Chain ecosystems** (for example Monad) that want fiat access for their apps on day one.
 
-## 5. What we take from each teardown
+## 5. Design ideas we adopted
 
 | Idea | Source | Why |
 |---|---|---|
-| Server-driven steps: the server sends `{state, transitions}`, the client only draws; errors are fields; the terminal flag comes from a table stored as data | fun.xyz `@fun-xyz/fiat-contract` | Handles KYC and provider differences without client releases |
-| Method picker: connected, recommended, more, unavailable (with a reason); limit and time on each row | fun.xyz | Proven at Polymarket scale |
-| Deposit address as the middle step, with a watcher that settles to the destination | Unifold, fun.xyz | The cleanest model for "onramp, then bridge" and for unlisted chains |
+| Server-driven steps: the server sends `{state, transitions}`, the client only draws; errors are fields; the terminal flag comes from a table stored as data | Industry pattern | Handles KYC and provider differences without client releases |
+| Method picker: connected, recommended, more, unavailable (with a reason); limit and time on each row | Industry pattern | Proven at large scale |
+| Deposit address as the middle step, with a watcher that settles to the destination | Industry pattern | The cleanest model for "onramp, then bridge" and for unlisted chains |
 | Relay open deposit addresses (reusable per route, variable amounts, Relay watches and fills) | Relay docs | Gives us deposit addresses without running a watcher or holding keys |
-| Session created by the app's server, bound to user and destination | D0, Stripe | Secrets stay on the server, and the destination cannot be changed in the browser |
-| "Use Crypto / Use Cash" switch; one QR rail per currency | D0, fun.xyz | Clear for SEA users |
-| Appearance playground as the demo site | D0 | Shows theming in seconds; best sales tool |
-| Small, versioned embed protocol | D0 | Same events in iframe and in-page modes |
-| Layers: controller with no framework, then hooks, then modal; thin framework wrappers | Unifold | Cheap support for React, Vue, Svelte, Solid and plain web |
-| `begin()` returns a Promise; one event envelope shared by modal, hooks and webhooks | Unifold, Stripe | Easy to integrate and to track |
-| Popup-safe start URL: the browser opens it at once, the server redirects | Unifold | Popup blockers do not break provider redirects |
-| Flags resolved as "prop, then server config, then default", with a hard server switch | Unifold, fun.xyz | Safe per-country rollout |
+| Session created by the app's server, bound to user and destination | Stripe | Secrets stay on the server, and the destination cannot be changed in the browser |
+| "Use Crypto / Use Cash" switch; one QR rail per currency | Industry pattern | Clear for SEA users |
+| Appearance playground as the demo site | Industry pattern | Shows theming in seconds; best sales tool |
+| Small, versioned embed protocol | Industry pattern | Same events in iframe and in-page modes |
+| Layers: controller with no framework, then hooks, then modal; thin framework wrappers | Industry pattern | Cheap support for React, Vue, Svelte, Solid and plain web |
+| `begin()` returns a Promise; one event envelope shared by modal, hooks and webhooks | Stripe | Easy to integrate and to track |
+| Popup-safe start URL: the browser opens it at once, the server redirects | Industry pattern | Popup blockers do not break provider redirects |
+| Flags resolved as "prop, then server config, then default", with a hard server switch | Industry pattern | Safe per-country rollout |
 | Theme tokens, `Custom` render prop, modal shell | RainbowKit (MIT) | The design language that developers already know |
 
-We copy **ideas**, not code. fun.xyz and Unifold publish MIT or Apache-2.0 bundles, but their repos are private. D0 is UNLICENSED. RainbowKit code may be reused with its MIT notice.
+We copy **ideas**, not code. RainbowKit code may be reused with its MIT notice.
 
 ## 6. Decisions made
 
 | Decision | Choice | Reason |
 |---|---|---|
 | Fork RainbowKit? | **No.** Borrow its patterns and specific files with the MIT notice | Wallet connection is not our product. Non-crypto apps must work without wagmi. Most apps already have a wallet stack |
-| Base the code on D0? | **No.** Copy its ideas | Its code is UNLICENSED and tied to D0's API |
+| Base the code on an existing cashier SDK? | **No.** Copy ideas only | The candidates are UNLICENSED or closed, and tied to their vendor's API |
 | Wallet access | A small `WalletAdapter` interface. The first implementation is `@openrampkit/wagmi` | Works next to RainbowKit, Privy, Dynamic and Reown |
 | Deposit addresses | Relay open deposit addresses by default. The app can also give its own address | No custody, no watcher to run in v1 |
 | Extensibility | Provider adapters, like wagmi connectors, with a public test kit | Third parties can add providers and legs without forking |
@@ -152,7 +143,7 @@ Minimum for a public alpha: wallet, transfer crypto, Coinbase, Transak, Swapped 
 | Relay deposit address edge cases (wrong token, wrong chain, underpayment) | Always set `refundTo`. Show chain and token warnings. Document recovery |
 | Legal: must stay "software, not money transmitter" | No custody. The app contracts the providers. Get a legal review before the alpha |
 | Adapter maintenance cost | Contract tests, nightly sandbox runs, and community ownership of long-tail adapters |
-| Competitors with funding (Unifold, fun.xyz) | Compete on openness, zero fee, self-hosting and SEA. Do not try to match their provider count |
+| Hosted competitors with funding | Compete on openness, zero fee, self-hosting and SEA. Do not try to match their provider count |
 
 ## 10. Open decisions
 

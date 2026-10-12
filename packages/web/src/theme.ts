@@ -45,7 +45,7 @@ export type ThemeOptions = {
   colors?: Partial<ThemeColors>
 }
 
-/** Fine control, like D0's appearance object. Applied on top of the theme. */
+/** Fine control of the look. Applied on top of the theme. */
 export type Appearance = {
   colors?: { light?: Partial<ThemeColors>; dark?: Partial<ThemeColors> }
   radius?: Partial<{ card: string; row: string; button: string; input: string }>

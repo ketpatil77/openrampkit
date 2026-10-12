@@ -80,7 +80,7 @@ type RailDef = { rail: PeerRail; method: string; currencies: string[]; countries
 const EEA = ['AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'HU', 'IE', 'IS', 'IT', 'LI', 'LT', 'LU', 'LV', 'MT', 'NL', 'NO', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK']
 
 /**
- * Rails and currencies with live liquidity on 2026-09-29 (docs/design/landscape.md "Peer"): USD on every
+ * Rails and currencies with live liquidity on 2026-09-29 (Peer orderbook): USD on every
  * rail; EUR and GBP on Wise and Revolut. Rail ids from https://docs.pay.peer.xyz/reference/payment-platforms.
  */
 export const PEER_RAILS: RailDef[] = [

@@ -234,7 +234,7 @@ export function sourceForChain(chain: string, wasNative: boolean, sources?: Sour
 
 export type IframeSignal = 'completed' | 'failed' | 'closed'
 
-/** `source` of the generic OpenRampKit embed protocol (the same shape D0 uses). */
+/** `source` of the generic OpenRampKit embed protocol. */
 export const EMBED_SOURCE = 'openramp-embed'
 const EMBED_TYPES: Record<string, IframeSignal> = { 'payment.completed': 'completed', 'payment.failed': 'failed', closed: 'closed' }
 

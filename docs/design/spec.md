@@ -467,7 +467,7 @@ It follows transitions only: it never guesses the next state. It handles `AWAIT`
 
 - Tokens as CSS variables: `--ork-color-*` (about 16 per mode), `--ork-radius-*`, `--ork-font-*`, `--ork-shadow-*`.
 - `lightTheme()`, `darkTheme()`, `autoTheme()` helpers with `accent`, `radius` and `font` options, like RainbowKit.
-- An `appearance` object for full control, like D0: colors per mode, radius per component, borders, fonts, and the merchant name and logo.
+- An `appearance` object for full control: colors per mode, radius per component, borders, fonts, and the merchant name and logo.
 
 ### 8.4 Events (browser)
 
@@ -531,7 +531,7 @@ openrampkit/
     adapters/relay/  adapters/transfer/  adapters/coinbase/  adapters/transak/
     adapters/swapped/  adapters/xendit/
   apps/
-    playground/      # appearance playground + live demo, like demo.d0fi.com
+    playground/      # appearance playground + live demo
     docs/            # docs site
   examples/
     next-crypto/     # deposit USDC to Base, with RainbowKit

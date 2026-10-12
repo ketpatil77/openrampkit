@@ -44,6 +44,11 @@ export type MockOptions = {
   /** With `crypto`: also offer the `exchange_transfer` method ("From an exchange") on the transfer leg. */
   exchange?: boolean
   /**
+   * Also offer `coinbase_account` (pay from a Coinbase balance) on the card leg, with the same hosted
+   * checkout. With `exchange`, the widget then shows the exchange picker.
+   */
+  exchangeConnect?: boolean
+  /**
    * Test only: add an `onchain` leg (method `wallet`, surface WALLET_TX) on a local dev chain such as
    * Anvil. It asks the wallet to send `token` to the destination address with a real ERC-20 transfer,
    * and completes only when the receipt, read over JSON-RPC from `rpcUrl`, shows that transfer.
@@ -206,7 +211,7 @@ export function mockAdapter(opts: MockOptions = {}) {
     {
       id: 'card',
       kind: 'fiat_onramp',
-      methods: ['card', 'apple_pay', 'google_pay'],
+      methods: opts.exchangeConnect ? ['card', 'apple_pay', 'google_pay', 'coinbase_account'] : ['card', 'apple_pay', 'google_pay'],
       from: { asset: { kind: 'fiat', currencies: '*' }, location: ['user_account'] },
       to: { asset: { kind: 'crypto', chains: { 'eip155:8453': [BASE_USDC.token] } }, location: ['address'] },
       regions: { allow: ['*'], deny: [] },

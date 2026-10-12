@@ -439,6 +439,54 @@ describe('payment steps (real server)', () => {
     expect(h.$('.token-panel')).toBeNull()
   })
 
+  it('exchange picker: one row opens the exchanges; connect, deposit with the exchange name, and back', async () => {
+    const h = await mount({ country: 'US', mock: { settleMs: 0, crypto: true, bridge: true, exchange: true, exchangeConnect: true } })
+    h.c.setTab('crypto')
+    await settle(h.el)
+    expect(h.$('[data-method="exchange_transfer"]')).toBeNull()
+    expect(h.$('[data-method="coinbase_account"]')).toBeNull()
+    const row = h.$('[data-method="exchanges"]')!
+    expect(row.textContent).toContain('From an exchange')
+    expect(row.textContent).toContain('Binance, Coinbase, OKX, Bybit, Kraken and more')
+    await h.click(row)
+    expect(h.c.getSnapshot().screen).toBe('exchanges')
+    expect(h.text()).toContain('Choose your exchange')
+    expect(h.$('[data-exchange="coinbase"]')!.textContent).toContain('Pay in the Coinbase app')
+    expect(h.$('[data-exchange="binance"]')!.textContent).toContain('Withdraw to a deposit address')
+    expect(h.$('[data-exchange="other"]')!.textContent).toContain('Other exchange')
+
+    // connect: the amount screen, and back returns to the picker
+    await h.click(h.$('[data-exchange="coinbase"]')!)
+    expect(h.c.getSnapshot()).toMatchObject({ screen: 'amount', exchange: 'coinbase', method: { method: 'coinbase_account' } })
+    h.c.back()
+    expect(h.c.getSnapshot().screen).toBe('exchanges')
+
+    // deposit: the hint names the exchange
+    h.el.open = false
+    await settle(h.el)
+    await h.c.selectExchange('binance')
+    await h.until(() => !h.c.getSnapshot().quotesLoading && h.c.getSnapshot().quotes.length > 0)
+    await h.c.confirm()
+    h.el.open = true
+    await settle(h.el)
+    expect(h.text()).toContain('In Binance, withdraw USDC and choose the')
+  })
+
+  it('exchange picker: when the exchange payment waits, the user can send from the same exchange to an address', async () => {
+    const h = await mount({ country: 'US', mock: { settleMs: 0, crypto: true, bridge: true, exchange: true, exchangeConnect: true } })
+    await h.c.selectExchange('coinbase')
+    h.c.setAmount('50')
+    await h.c.submitAmount()
+    await h.until(() => !h.c.getSnapshot().quotesLoading)
+    await h.c.confirm()
+    await h.until(() => h.c.getSnapshot().screen === 'step')
+    await settle(h.el)
+    expect(h.c.depositFallback()).toMatchObject({ id: 'coinbase', fallback: 'exchange_transfer' })
+    await h.click(h.button('Send from Coinbase to an address instead'))
+    await h.until(() => h.c.getSnapshot().screen === 'quotes' && !h.c.getSnapshot().quotesLoading)
+    expect(h.c.getSnapshot()).toMatchObject({ exchange: 'coinbase', method: { method: 'exchange_transfer' } })
+  })
+
   it('exchange_transfer: own title, exchange examples on the deposit address step, simulate deposit', async () => {
     const h = await mount({ country: 'VN', mock: { settleMs: 0, crypto: true, bridge: true, exchange: true } })
     h.c.setTab('crypto')

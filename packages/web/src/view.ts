@@ -52,6 +52,8 @@ export function screenTitle(s: Snapshot | undefined, m: Messages, appearance?: A
     case 'amount':
       if (withdraw && s.tab === 'crypto') return m.withdrawAmountTitle
       return s.method?.name ?? base
+    case 'exchanges':
+      return m.exchangePickerTitle
     case 'quotes':
       return s.method?.method === 'exchange_transfer' ? m.exchangeTitle : s.method?.method === 'transfer' ? m.transferTitle : m.quotesTitle
     case 'step': {

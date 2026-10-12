@@ -4,8 +4,8 @@ import type { PropertyValues, TemplateResult } from 'lit'
 import { live } from 'lit/directives/live.js'
 import { isValidTargetAddress } from '@openrampkit/client'
 import type { DepositController, Snapshot, Tab } from '@openrampkit/client'
-import { isAddressTransfer, isWebUrl, methodName, searchSourceTokens, sourceTokenKey } from '@openrampkit/core'
-import type { FieldSpec, MethodOption, OpenRampError, Payment, PublicQuote, Step, Surface, Transition } from '@openrampkit/core'
+import { OTHER_EXCHANGE, isAddressTransfer, isExchangeMethod, isWebUrl, methodName, searchSourceTokens, sourceTokenKey } from '@openrampkit/core'
+import type { ExchangeOption, FieldSpec, MethodOption, OpenRampError, Payment, PublicQuote, Step, Surface, Transition } from '@openrampkit/core'
 import { displayChain, formatAmount, formatCountdown, formatEta, formatFiat, formatToken, shortAddress, titleCase } from './format.js'
 import { icons, methodIcon } from './icons.js'
 import { resolveMessages } from './messages.js'
@@ -462,7 +462,7 @@ export class OpenRampModal extends LitElement {
 
   private _renderHeader(m: Messages) {
     const screen = this._screen
-    const canBack = screen === 'amount' || screen === 'quotes'
+    const canBack = screen === 'amount' || screen === 'quotes' || screen === 'exchanges'
     const a = this.appearance
     const showLogo = !!a?.logoUrl && (screen === 'methods' || screen === 'loading')
     return html`
@@ -493,6 +493,8 @@ export class OpenRampModal extends LitElement {
         return this._renderTarget(m, s)
       case 'methods':
         return s.direction === 'withdraw' ? this._renderWithdrawMethods(m, s) : this._renderMethods(m, s)
+      case 'exchanges':
+        return this._renderExchanges(m, s)
       case 'amount':
         return this._renderAmount(m, s)
       case 'quotes':
@@ -529,7 +531,11 @@ export class OpenRampModal extends LitElement {
 
   private _renderMethods(m: Messages, s: Snapshot) {
     const c = this.controller!
-    const { showTabs, tab, list } = methodTabs(c.methodsForTab('crypto'), c.methodsForTab('cash'), s.tab)
+    // With a connect method (Binance, Coinbase), one "From an exchange" row opens the exchange picker.
+    const exchanges = c.exchangeOptions()
+    const pickerRow = exchanges.length ? exchangePickerRow(c.methodsForTab('crypto').concat(c.methodsForTab('cash')).filter(isExchangeMethod), m) : undefined
+    const keep = (list: MethodOption[]) => (pickerRow ? list.filter((x) => !isExchangeMethod(x)) : list)
+    const { showTabs, tab, list } = methodTabs(pickerRow ? [...keep(c.methodsForTab('crypto')), pickerRow] : c.methodsForTab('crypto'), keep(c.methodsForTab('cash')), s.tab)
     const onTabKey = (e: KeyboardEvent) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
       e.preventDefault()
@@ -573,13 +579,14 @@ export class OpenRampModal extends LitElement {
 
   private _renderMethodRow(m: Messages, s: Snapshot, x: MethodOption) {
     const unavailable = x.group === 'unavailable'
-    const sub = methodSubtitle(x, s.walletAddress, m)
+    const picker = x.method === EXCHANGE_PICKER
+    const sub = picker ? exchangeNames(this.controller!.exchangeOptions(), m) : methodSubtitle(x, s.walletAddress, m)
     return html`<button
       class="row"
       type="button"
       ?disabled=${unavailable}
       data-method=${x.method}
-      @click=${() => void this.controller?.selectMethod(x.method)}
+      @click=${() => (picker ? this.controller?.openExchanges() : void this.controller?.selectMethod(x.method))}
     >
       <span class="row-icon">${methodIcon(x.kind, x.method)}</span>
       <span class="row-main">
@@ -588,6 +595,36 @@ export class OpenRampModal extends LitElement {
       </span>
       ${unavailable ? nothing : html`<span class="row-end">${formatEta(x.eta, m)}</span><span class="chevron">${icons.chevron}</span>`}
     </button>`
+  }
+
+  private _renderExchanges(m: Messages, s: Snapshot) {
+    const c = this.controller!
+    const rows = c.exchangeOptions()
+    return html`
+      <ul class="rows" aria-label=${m.exchangePickerTitle}>
+        ${rows.map(
+          (x) => html`<li>
+            <button class="row" type="button" data-exchange=${x.id} ?disabled=${s.busy} @click=${() => void c.selectExchange(x.id)}>
+              <span class="row-icon">${x.id === OTHER_EXCHANGE ? icons.exchange : tokenLogo({ symbol: x.name })}</span>
+              <span class="row-main">
+                <span class="row-title">${exchangeLabel(x, m)}</span>
+                <span class="row-sub">${x.mode === 'connect' ? m.exchangeConnectSub(x.name) : m.exchangeDepositSub}</span>
+              </span>
+              <span class="chevron">${icons.chevron}</span>
+            </button>
+          </li>`,
+        )}
+      </ul>
+      ${this._renderErrorNotice(s.error)}
+    `
+  }
+
+  /** "Send from Binance to an address instead", when the payment on the exchange's page did not work */
+  private _renderDepositInstead(m: Messages, s: Snapshot) {
+    const c = this.controller!
+    const row = c.depositFallback()
+    if (!row) return nothing
+    return html`<button class="btn secondary" type="button" ?disabled=${s.busy} @click=${() => void c.depositInstead()}>${m.depositInstead(row.name)}</button>`
   }
 
   // ---------- withdraw: tabs, target and payout methods ----------
@@ -983,6 +1020,7 @@ export class OpenRampModal extends LitElement {
       ${awaiting && surface && !errors.length ? html`<div class="status-line"><span class="spinner" aria-hidden="true"></span>${m.checkingStatus}</div>` : nothing}
       ${step.state === 'PAYMENT' && !(s.surfaceClosed && surface?.kind === 'IFRAME')
         ? html`<div class="stack">
+            ${this._renderDepositInstead(m, s)}
             <button class="btn ghost" type="button" ?disabled=${s.busy} @click=${() => void c.fire('restart')}>${m.chooseOther}</button>
           </div>`
         : nothing}
@@ -1128,7 +1166,9 @@ export class OpenRampModal extends LitElement {
         const chain = surface.chainName ?? displayChain(surface.chain)
         const symbol = surface.symbol ?? 'tokens'
         return html`
-          ${s.method?.method === 'exchange_transfer' ? html`<div class="notice info">${icons.exchange}<span>${m.exchangeHint(symbol, chain)}</span></div>` : nothing}
+          ${s.method?.method === 'exchange_transfer'
+            ? html`<div class="notice info">${icons.exchange}<span>${namedExchange(c, s) ? m.exchangeHintNamed(namedExchange(c, s)!, symbol, chain) : m.exchangeHint(symbol, chain)}</span></div>`
+            : nothing}
           <div class="hint" style="margin-top:0">${m.depositAddressHint(symbol, chain)}</div>
           ${this._qr(surface.address, m.address)}
           <div class="kv">
@@ -1262,6 +1302,7 @@ export class OpenRampModal extends LitElement {
         ${retry
           ? html`<button class="btn" type="button" ?disabled=${s.busy} @click=${() => void c.fire('restart')}>${m.tryAgain}</button>`
           : nothing}
+        ${retry ? this._renderDepositInstead(m, s) : nothing}
         <button class="btn ${retry ? 'secondary' : ''}" type="button" @click=${() => this.close()}>${m.close}</button>
       </div>`
   }
@@ -1326,6 +1367,34 @@ function chainSelect(label: string, chains: string[], selected: string | undefin
   return html`<select class="input" aria-label=${label} @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}>
     ${chains.map((ch) => html`<option value=${ch} ?selected=${selected === ch}>${displayChain(ch)}</option>`)}
   </select>`
+}
+
+/** Method id of the "From an exchange" row that opens the exchange picker */
+const EXCHANGE_PICKER = 'exchanges'
+
+/** The picker row, in the best group of the methods it stands for, with their shortest ETA */
+function exchangePickerRow(methods: MethodOption[], m: Messages): MethodOption {
+  const groups = ['connected', 'recommended', 'more'] as const
+  const group = groups.find((g) => methods.some((x) => x.group === g)) ?? 'more'
+  const ok = methods.filter((x) => x.group !== 'unavailable')
+  const eta = ok.length ? { min: Math.min(...ok.map((x) => x.eta.min)), max: Math.min(...ok.map((x) => x.eta.max)) } : { min: 0, max: 0 }
+  return { method: EXCHANGE_PICKER, name: m.fromExchange, kind: 'exchange', group, providers: [], pathwayIds: [], eta }
+}
+
+function exchangeLabel(x: ExchangeOption, m: Messages): string {
+  return x.id === OTHER_EXCHANGE ? m.otherExchange : x.name
+}
+
+/** Second line of the picker row: the named exchanges */
+function exchangeNames(rows: ExchangeOption[], m: Messages): string {
+  const named = rows.filter((x) => x.id !== OTHER_EXCHANGE).map((x) => x.name)
+  return rows.some((x) => x.id === OTHER_EXCHANGE) ? m.exchangeNamesMore(named.join(', ')) : named.join(', ')
+}
+
+/** The exchange the user picked, by name, for the deposit address hint ("Other exchange" has none) */
+function namedExchange(c: DepositController, s: Snapshot): string | undefined {
+  if (!s.exchange || s.exchange === OTHER_EXCHANGE) return undefined
+  return c.exchangeOptions().find((x) => x.id === s.exchange)?.name
 }
 
 function sameTokenId(chain: string, a: string, b: string): boolean {

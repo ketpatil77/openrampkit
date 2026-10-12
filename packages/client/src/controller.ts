@@ -2,7 +2,7 @@
 // state for one session. UIs render `getSnapshot()` and call its actions. The session's direction
 // picks the flow: deposit (methods, amount, quotes) or withdraw (target, amount, quotes).
 
-import { CHAINS, USDC, accountFor, chainNamespace, cmp, createClientEvent, currencyForCountry, isAddressTransfer, isSafeLinkUrl, isTerminal, isWebUrl, openRampError } from '@openrampkit/core'
+import { CHAINS, USDC, accountFor, exchangeOptions, chainNamespace, cmp, createClientEvent, currencyForCountry, isAddressTransfer, isSafeLinkUrl, isTerminal, isWebUrl, openRampError } from '@openrampkit/core'
 import type {
   Direction,
   MethodOption,
@@ -13,6 +13,7 @@ import type {
   PlanResult,
   PublicSession,
   PublicQuote,
+  ExchangeOption,
   SourceChain,
   Step,
   Transition,
@@ -31,7 +32,7 @@ export type Tab = 'crypto' | 'cash'
 export type SurfaceSignal = 'completed' | 'failed' | 'closed'
 
 /** `target` is the withdraw "To wallet" form (network, token, address). */
-export type ScreenName = 'loading' | 'target' | 'methods' | 'amount' | 'quotes' | 'step' | 'result' | 'error'
+export type ScreenName = 'loading' | 'target' | 'methods' | 'exchanges' | 'amount' | 'quotes' | 'step' | 'result' | 'error'
 
 /** Withdraw "To wallet" form state */
 export type TargetDraft = { chain: string; token: string; symbol: string; decimals: number; address: string }
@@ -62,6 +63,8 @@ export type Snapshot = {
    * logos). Undefined until it loads or when it fails: a UI then uses `defaultSourceTokens`.
    */
   sources?: SourceChain[]
+  /** Deposit: the exchange the user picked in the "From an exchange" picker (an `ExchangeOption` id) */
+  exchange?: string
   /** The provider page (IFRAME surface) said the user closed it. Cleared by `reopenSurface()` or a new step. */
   surfaceClosed: boolean
   /** Withdraw: the "To wallet" form */
@@ -199,6 +202,9 @@ export class RampController {
       this.set({ screen: 'error', error })
     }
   }
+
+  /** The plan that loads after a restart (see `applySession`) */
+  private replanning: Promise<void> | undefined
 
   private async replan() {
     if (this.snap.direction === 'withdraw') return this.setTab(this.snap.tab)
@@ -417,11 +423,52 @@ export class RampController {
     return all.filter((m) => (tab === 'crypto' ? CRYPTO_KINDS.has(m.kind) : !CRYPTO_KINDS.has(m.kind)))
   }
 
-  async selectMethod(method: string) {
+  /** Deposit: rows of the "From an exchange" picker. Empty when the plan has no connect method. */
+  exchangeOptions(): ExchangeOption[] {
+    return this.snap.direction === 'withdraw' ? [] : exchangeOptions(this.snap.plan?.methods ?? [])
+  }
+
+  /** Show the exchange picker */
+  openExchanges() {
+    if (!this.exchangeOptions().length) return
+    this.set({ screen: 'exchanges', exchange: undefined, error: undefined })
+  }
+
+  /** Pick an exchange: start its connect method, else the deposit address method. */
+  async selectExchange(id: string) {
+    const row = this.exchangeOptions().find((x) => x.id === id)
+    if (row) return this.selectMethod(row.method, { exchange: row.id })
+  }
+
+  /**
+   * The deposit method to offer when the payment on the exchange's page did not work: the picked
+   * exchange's `fallback`, while that payment waits for the user or after it failed.
+   */
+  depositFallback(): ExchangeOption | undefined {
+    const row = this.exchangeOptions().find((x) => x.id === this.snap.exchange)
+    if (!row?.fallback || this.snap.method?.method !== row.method) return undefined
+    const state = this.snap.session?.step.state
+    return state === 'PAYMENT' || state === 'FAILED' ? row : undefined
+  }
+
+  /**
+   * Leave the exchange payment and send from the same exchange to a deposit address. The server refuses
+   * the restart when the exchange already took the payment, so the user cannot pay twice.
+   */
+  async depositInstead() {
+    const row = this.depositFallback()
+    if (!row?.fallback) return
+    this.replanning = undefined
+    await this.restart()
+    await this.replanning
+    if (this.snap.screen === 'methods' && !this.snap.error) await this.selectMethod(row.fallback, { exchange: row.id })
+  }
+
+  async selectMethod(method: string, opts: { exchange?: string } = {}) {
     const m = this.snap.plan?.methods.find((x) => x.method === method)
     if (!m || m.group === 'unavailable') return
     this.emit('method.selected', { method })
-    this.set({ method: m, quotes: [], quoteErrors: [], error: undefined, selectedQuoteId: undefined })
+    this.set({ method: m, exchange: opts.exchange, quotes: [], quoteErrors: [], error: undefined, selectedQuoteId: undefined })
     if (isAddressTransfer(method)) {
       // No amount needed: the user sends any amount to a deposit address.
       this.set({ amount: '', screen: 'quotes' })
@@ -614,10 +661,12 @@ export class RampController {
   back() {
     const screen = this.snap.screen
     clearTimeout(this.quoteTimer)
-    if (screen === 'quotes') this.set({ screen: isAddressTransfer(this.snap.method?.method) ? 'methods' : 'amount', error: undefined })
+    const list = this.snap.exchange ? 'exchanges' : 'methods'
+    if (screen === 'exchanges') this.set({ screen: 'methods', error: undefined })
+    else if (screen === 'quotes') this.set({ screen: isAddressTransfer(this.snap.method?.method) ? list : 'amount', error: undefined })
     else if (screen === 'amount') {
       const toTarget = this.snap.direction === 'withdraw' && this.snap.tab === 'crypto' && !this.lockedTarget()
-      this.set({ screen: toTarget ? 'target' : 'methods', error: undefined })
+      this.set({ screen: toTarget ? 'target' : list, error: undefined })
     }
     else if (screen === 'step' && this.snap.session?.step.state === 'PAYMENT') void this.restart()
   }
@@ -655,7 +704,7 @@ export class RampController {
     if (step.state === 'SELECT_METHOD') {
       clearTimeout(this.pollTimer)
       this.set({ method: undefined, quotes: [], quoteErrors: [], selectedQuoteId: undefined, amount: '' })
-      void this.replan()
+      this.replanning = this.replan()
       return
     }
     this.set({ screen: 'step' })

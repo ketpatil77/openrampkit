@@ -3,11 +3,12 @@
 // deposit (a `sreq:{requestId}` ref). The session-bound deposit legs in deposit-address.ts do not use
 // these addresses.
 
+import { claimOnce } from '@openrampkit/adapter'
 import type { AdapterContext, ScopedKV, StandingAddressInput, StandingDeposit, StandingDepositsInput } from '@openrampkit/adapter'
 import { OpenRampException, openRampError, toBaseUnits } from '@openrampkit/core'
 import type { Amount, CryptoAsset, LegStep } from '@openrampkit/core'
 import type { RelayRuntime } from './client.js'
-import { STANDING_ADDRESS_TTL_SEC } from './config.js'
+import { STANDING_ADDRESS_TTL_SEC, USED_TTL_SEC } from './config.js'
 import type { DepositAddresses } from './deposit-address.js'
 import type { RelayRequest } from './types.js'
 import { addrKey, isSolana, relayOutput, sameAsset, toOpenRamp } from './helpers.js'
@@ -121,8 +122,15 @@ export function standingAddresses(rt: RelayRuntime, deposits: DepositAddresses) 
       const at = Date.parse(r.createdAt)
       if (!Number.isFinite(at) || at < floor) continue
       if (!requestSourceTxHash(r)) continue
-      const amount = relayOutput(r.data?.metadata?.currencyIn, origin)
       const key = requestKey(r)
+      // Relay can give a session's transfer leg the same address. The session flow and this one claim a
+      // deposit with the same key (`relayreq:`), so one deposit goes to one of them only.
+      const used = `relayreq:${key}`
+      const owner = `standing:${input.address}`
+      const usedBy = await ctx.shared.get<string>(used)
+      if (usedBy && usedBy !== owner) continue
+      if (!usedBy && !(await claimOnce(ctx.shared, used, owner, USED_TTL_SEC))) continue
+      const amount = relayOutput(r.data?.metadata?.currencyIn, origin)
       out.push({ id: key, legRef: standingRef(r.id, input.address, key), at, ...(amount ? { input: amount } : {}) })
     }
     return out

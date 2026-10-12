@@ -289,6 +289,10 @@ async function depositSession(rt: Runtime, addr: StandingRecord, a: Adapter, dep
  * session list then polls `status(legRef)` until the leg ends.
  */
 async function createDepositSession(rt: Runtime, addr: StandingRecord, a: Adapter, dep: StandingDeposit, sid: string, stillMine: () => Promise<boolean>): Promise<boolean> {
+  // Before any side effect (the open list, the indexes): the claim is this sweep's. The check runs again
+  // right before the write. Every side effect uses the same session id, so a sweep that stops between
+  // the two checks leaves entries that the session of the other sweep then owns.
+  if (!(await stillMine())) return false
   const spec = transferLeg(a)
   if (!spec) throw new Error(`adapter ${a.id} has no transfer leg`)
   const input: CreateSessionInput = {

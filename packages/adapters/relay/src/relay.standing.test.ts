@@ -204,3 +204,21 @@ describe('relay: status of a standing deposit (sreq: ref)', () => {
     expect(await t.status()).toMatchObject({ status: 'refunded', transactions: [{ role: 'source' }, { role: 'refund', hash: '0xoutabc' }] })
   })
 })
+
+describe('relay: a deposit at an address that a session also watches', () => {
+  it('goes to the flow that claims it first, never to both', async () => {
+    const { fetch } = fakeFetch([{ method: 'GET', match: '/requests/v3', reply: () => ({ requests: [request('8')] }) }])
+    const shared = memoryKV()
+    const ctx = { fetch, shared, log: makeCtx({ fetch }).log }
+    const a = relay({ apiKey: 'k' })
+    // A session already bound this deposit
+    await shared.put(`relayreq:tx:0x${'8'.padStart(64, '0')}`, 'sess_1:dep:sess_1:addr', 3600)
+    expect(await a.standingDeposits!({ ref: ADDR, address: ADDR, origin: ORIGIN, since: 0 }, ctx)).toEqual([])
+    // A free deposit: the standing address claims it, and lists it again on the next poll
+    const shared2 = memoryKV()
+    const ctx2 = { fetch, shared: shared2, log: ctx.log }
+    expect(await a.standingDeposits!({ ref: ADDR, address: ADDR, origin: ORIGIN, since: 0 }, ctx2)).toHaveLength(1)
+    expect(await shared2.get(`relayreq:tx:0x${'8'.padStart(64, '0')}`)).toBe(`standing:${ADDR}`)
+    expect(await a.standingDeposits!({ ref: ADDR, address: ADDR, origin: ORIGIN, since: 0 }, ctx2)).toHaveLength(1)
+  })
+})

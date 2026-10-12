@@ -240,9 +240,19 @@ async function selectRoute(rt: Runtime, req: Request, rec: SessionRecord): Promi
   if (bounds) return errorResponse(bounds, 422)
   const walletAddress = walletAddressOf(body.walletAddress)
   if (walletAddress) rec.walletAddress = walletAddress
+  await screenDepositWallet(rt, rec, stored)
   await startWithFailover(rt, rec, body.quoteId, stored)
   await saveSession(rt, rec)
   return json(publicSession(rec))
+}
+
+/** `screenDepositWallets`: screen the wallet that pays a `wallet` deposit, on the chain it pays from. Throws when refused. */
+async function screenDepositWallet(rt: Runtime, rec: SessionRecord, stored: StoredQuote): Promise<void> {
+  if (!rt.config.screenDepositWallets || rec.direction === 'withdraw' || stored.pathway.method !== 'wallet') return
+  const input = stored.quote.input.asset
+  if (input.kind !== 'crypto') return
+  if (!rec.walletAddress) throw new OpenRampException(openRampError('BAD_REQUEST', { message: 'Connect a wallet first.' }), 400)
+  await screenTarget(rt, { type: 'crypto', chain: input.chain, token: input.token, address: rec.walletAddress })
 }
 
 /** Most other quotes that one select tries after the chosen quote failed to start */

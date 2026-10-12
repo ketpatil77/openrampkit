@@ -101,8 +101,15 @@ export type OpenRampConfig = {
   /**
    * Withdraw: screen a crypto target address (sanctions, blocked lists) before the user can use it.
    * Return false to refuse the address. An error also refuses it (fail closed).
+   * With `screenDepositWallets`, it also screens the wallet that pays a deposit.
    */
   screenAddress?: (address: string, chain: string) => Promise<boolean>
+  /**
+   * Deposit: also run `screenAddress` on the connected wallet before a `wallet` payment starts (on the
+   * chain the user pays from). A refused wallet gets `403 ADDRESS_REJECTED`. Default `false`. A deposit to
+   * an address (`transfer`) has no known sender before the money arrives, so it is not screened here.
+   */
+  screenDepositWallets?: boolean
   /**
    * Withdraw with `custody: 'app'`: send transactions from the app's treasury wallet.
    * The server calls it when a leg asks for a WALLET_TX, instead of asking the user.

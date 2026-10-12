@@ -249,3 +249,32 @@ describe('request bodies without a body stream (Firefox)', () => {
     expect(await readText(empty, 10)).toBe('')
   })
 })
+
+describe('screenDepositWallets', () => {
+  const USER = '0x1111111111111111111111111111111111111111'
+  async function walletSelect(extra: Partial<OpenRampConfig>, method = 'wallet') {
+    const { ramp, call } = make(extra)
+    const s = await ramp.sessions.create({ userId: 'u', country: 'US', destination: DEST })
+    await call(`/sessions/${s.id}/plan`, post(s.clientSecret, { walletConnected: true, walletAddress: USER }))
+    const body = method === 'wallet' ? { method, amount: '10', source: { chain: 'eip155:42161', token: USDC['eip155:42161']! } } : { method, amount: '10' }
+    const q = await (await call(`/sessions/${s.id}/quotes`, post(s.clientSecret, body))).json()
+    return call(`/sessions/${s.id}/select`, post(s.clientSecret, { quoteId: q.quotes[0].id, walletAddress: USER }))
+  }
+
+  it('screens the paying wallet on its chain before a wallet deposit starts', async () => {
+    const screenAddress = vi.fn(async () => false)
+    const r = await walletSelect({ screenAddress, screenDepositWallets: true })
+    expect(r.status).toBe(403)
+    expect((await r.json()).error.code).toBe('ADDRESS_REJECTED')
+    expect(screenAddress).toHaveBeenCalledWith(USER, 'eip155:42161')
+    const ok = vi.fn(async () => true)
+    expect((await walletSelect({ screenAddress: ok, screenDepositWallets: true })).status).toBe(200)
+  })
+
+  it('is off by default, and other methods are not screened', async () => {
+    const screenAddress = vi.fn(async () => false)
+    expect((await walletSelect({ screenAddress })).status).toBe(200)
+    expect((await walletSelect({ screenAddress, screenDepositWallets: true }, 'card')).status).toBe(200)
+    expect(screenAddress).not.toHaveBeenCalled()
+  })
+})

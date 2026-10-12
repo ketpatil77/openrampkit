@@ -1,7 +1,8 @@
 // HTTP routes. Every route takes the runtime and returns a Response; errors are thrown as OpenRampException.
 
 import { claimWebhook, releaseWebhook } from '@openrampkit/adapter'
-import { OpenRampException, isFinalStatus, isLegTerminal, isTerminal, openRampError } from '@openrampkit/core'
+import { OpenRampException, cmp, isFinalStatus, isLegTerminal, isTerminal, mulRatio, openRampError } from '@openrampkit/core'
+import type { Amount } from '@openrampkit/core'
 import type { SurfaceKind } from '@openrampkit/core'
 import { safeEqual, sha256Hex } from './crypto.js'
 import { MAX_WEBHOOK_BODY_BYTES } from './config.js'
@@ -285,9 +286,37 @@ async function startWithFailover(rt: Runtime, rec: SessionRecord, quoteId: strin
   }
 }
 
+/** A failover quote may deliver at most this much less than the quote the user chose (1%) */
+const FAILOVER_MIN_OUTPUT_RATIO = '0.99'
+
+/** Same asset (kind, currency or chain and token) and the same value */
+function sameAmount(a: Amount, b: Amount): boolean {
+  return sameAssetOf(a, b) && cmp(a.value, b.value) === 0
+}
+
+function sameAssetOf(a: Amount, b: Amount): boolean {
+  const x = a.asset
+  const y = b.asset
+  if (x.kind === 'fiat' && y.kind === 'fiat') return x.currency.toUpperCase() === y.currency.toUpperCase()
+  if (x.kind === 'crypto' && y.kind === 'crypto') return x.chain === y.chain && (x.chain.startsWith('eip155:') ? x.token.toLowerCase() === y.token.toLowerCase() : x.token === y.token)
+  return false
+}
+
+/**
+ * Money safety of a failover: the user confirmed one quote, so another quote may only start when it
+ * charges the same amount in the same asset, and delivers the same asset and at least 99% of the
+ * chosen output. Else the user picks again.
+ */
+function failoverKeepsTerms(chosen: StoredQuote, next: StoredQuote): boolean {
+  const a = chosen.quote
+  const b = next.quote
+  return sameAmount(a.input, b.input) && sameAssetOf(a.output, b.output) && cmp(b.output.value, mulRatio(a.output.value, FAILOVER_MIN_OUTPUT_RATIO)) >= 0
+}
+
 /**
  * The best quote left for a failover: same quote request (`round`) and method, a first leg from an
- * adapter that did not fail, not expired, and inside the session's `amountBounds`. Lowest `rank` first.
+ * adapter that did not fail, not expired, inside the session's `amountBounds`, and with the terms the
+ * user confirmed (see `failoverKeepsTerms`). Lowest `rank` first.
  */
 function nextQuote(rec: SessionRecord, chosen: StoredQuote, tried: Set<string>, failed: Set<string>): { id: string; stored: StoredQuote } | undefined {
   if (chosen.round === undefined) return undefined
@@ -299,7 +328,8 @@ function nextQuote(rec: SessionRecord, chosen: StoredQuote, tried: Set<string>, 
       q.pathway.method === chosen.pathway.method &&
       !failed.has(q.pathway.legs[0]!.adapterId) &&
       !(q.quote.expiresAt && Date.parse(q.quote.expiresAt) < now) &&
-      !boundsError(rec, q.quote.input),
+      !boundsError(rec, q.quote.input) &&
+      failoverKeepsTerms(chosen, q),
     )
     .sort(([, a], [, b]) => (a.rank ?? 0) - (b.rank ?? 0))
     .map(([id, q]) => ({ id, stored: q }))[0]

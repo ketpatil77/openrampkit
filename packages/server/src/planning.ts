@@ -237,6 +237,13 @@ export async function quotes(rt: Runtime, rec: SessionRecord, body: QuotesBody):
   // A pathway that timed out while an adapter quote was open: that adapter failed.
   for (const t of tracks) if (t.inFlight) tallyAdd(tally, t.inFlight, 'quoteFail')
   tally.closed = true
+  // One session counts at most one quote failure per adapter, so the browser of one session (it picks
+  // the amount and the token) cannot push an adapter's failure rate up and open the breaker for everyone.
+  for (const [id, c] of tally.counts) {
+    if (!c.quoteFail) continue
+    if (rec.healthFailed?.includes(id)) c.quoteFail = 0
+    else rec.healthFailed = [...(rec.healthFailed ?? []), id]
+  }
   await Promise.all([
     ...[...tally.counts].map(([id, c]) => recordHealth(rt, id, c)),
     ...[...gates].filter(([, g]) => g === 'probe').map(async ([id]) => {

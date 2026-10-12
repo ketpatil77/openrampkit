@@ -92,24 +92,18 @@ export function isProviderFailure(e: unknown): boolean {
   return !(e instanceof OpenRampException && NOT_PROVIDER_FAILURE.has(e.error.code))
 }
 
-/** True for a timeout: our own `withTimeout`, an abort, or an HTTP helper error with `timeout: true`. */
-function isTimeout(e: unknown): boolean {
-  if (!(e instanceof Error)) return false
-  return e.name === 'TimeoutError' || e.name === 'AbortError' || (e as { timeout?: unknown }).timeout === true || /^Timed out after/.test(e.message)
-}
-
 /**
- * True when a failed start may try another provider: PROVIDER_UNAVAILABLE, a timeout, or another
- * OpenRampError with `retryable: true`. Never for the codes in `NOT_PROVIDER_FAILURE` (the user, the
- * amount or the request is the problem, and another provider would answer the same).
+ * True when a failed start may try another provider: PROVIDER_UNAVAILABLE, or another OpenRampError
+ * with `retryable: true`, and never a user error (see NOT_PROVIDER_FAILURE). A timeout never fails over:
+ * the provider may have made the order (and, for a push payment, asked the user to approve it), so a
+ * second provider could charge the user twice.
  */
 export function canFailOver(e: unknown): boolean {
-  if (e instanceof OpenRampException) {
-    const err: OpenRampError = e.error
-    if (NOT_PROVIDER_FAILURE.has(err.code)) return false
-    return err.code === 'PROVIDER_UNAVAILABLE' || err.retryable === true
-  }
-  return isTimeout(e)
+  // An adapter maps a provider timeout to PROVIDER_UNAVAILABLE with status 504 (`httpErrorToOpenRamp`).
+  if (!(e instanceof OpenRampException) || e.status === 504) return false
+  const err: OpenRampError = e.error
+  if (NOT_PROVIDER_FAILURE.has(err.code)) return false
+  return err.code === 'PROVIDER_UNAVAILABLE' || err.retryable === true
 }
 
 /**

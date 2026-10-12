@@ -122,12 +122,15 @@ describe('provider health counts', () => {
     b.ctl.quoteMode = 'hang'
     const r = await t.quote(s)
     expect(r.errors.map((e) => e.code)).toEqual(['PROVIDER_UNAVAILABLE'])
-    // A provider error and a timeout are failures.
+    // One session counts one quote failure per adapter: its browser cannot open the breaker for everyone.
+    expect((await t.health('b')).counts).toMatchObject({ quoteOk: 0, quoteFail: 1 })
+    // A timeout in another session is a failure too.
+    await t.quote(await t.session())
     expect((await t.health('b')).counts).toMatchObject({ quoteOk: 0, quoteFail: 2 })
 
     const pub = await (await t.post(`/sessions/${s.id}/select`, s.clientSecret, { quoteId: r.quotes[0]!.id })).json()
     expect(pub.step.state).toBe('PAYMENT')
-    expect((await t.health('a')).counts).toMatchObject({ quoteOk: 3, startOk: 1 })
+    expect((await t.health('a')).counts).toMatchObject({ quoteOk: 4, startOk: 1 })
     await t.call('/webhooks/a', { method: 'POST', body: JSON.stringify([{ ref: 'a-1', status: 'succeeded', eventId: 'e1' }]) })
     expect((await t.health('a')).counts.legSucceeded).toBe(1)
   })
@@ -177,8 +180,10 @@ describe('provider health counts', () => {
     expect(canFailOver(new OpenRampException(openRampError('PROVIDER_ERROR')))).toBe(false)
     expect(canFailOver(new OpenRampException(openRampError('AMOUNT_TOO_LOW', { retryable: true })))).toBe(false)
     expect(canFailOver(new OpenRampException(openRampError('KYC_REJECTED')))).toBe(false)
-    expect(canFailOver(new Error('Timed out after 50 ms'))).toBe(true)
-    expect(canFailOver(Object.assign(new Error('x'), { timeout: true }))).toBe(true)
+    // A timeout never fails over: the provider may have made the order.
+    expect(canFailOver(new Error('Timed out after 50 ms'))).toBe(false)
+    expect(canFailOver(Object.assign(new Error('x'), { timeout: true }))).toBe(false)
+    expect(canFailOver(new OpenRampException(openRampError('PROVIDER_UNAVAILABLE', { message: 'X did not answer in time.' }), 504))).toBe(false)
     expect(canFailOver(new Error('boom'))).toBe(false)
   })
 })
@@ -303,7 +308,7 @@ describe('circuit breaker', () => {
 describe('failover at start', () => {
   it('starts the next best quote when the first provider is unavailable', async () => {
     const a = cardAdapter('a', { output: '9.5' })
-    const b = cardAdapter('b', { output: '9' })
+    const b = cardAdapter('b', { output: '9.45' })
     const t = make([a, b])
     const s = await t.session()
     const r = await t.quote(s)
@@ -326,10 +331,10 @@ describe('failover at start', () => {
     expect((await t.health('b')).counts.startOk).toBe(1)
   })
 
-  it('fails over on a timeout, but never on a user error or an unknown error', async () => {
-    for (const [mode, expectFailover] of [['timeout', true], ['amount_too_low', false], ['bad_request', false], ['raw', false]] as const) {
+  it('never fails over on a timeout, a user error or an unknown error', async () => {
+    for (const [mode, expectFailover] of [['unavailable', true], ['timeout', false], ['amount_too_low', false], ['bad_request', false], ['raw', false]] as const) {
       const a = cardAdapter('a', { output: '9.5' })
-      const b = cardAdapter('b', { output: '9' })
+      const b = cardAdapter('b', { output: '9.45' })
       const t = make([a, b])
       const s = await t.session()
       const r = await t.quote(s)
@@ -342,7 +347,7 @@ describe('failover at start', () => {
 
   it('never fails over once the provider returned a step', async () => {
     const a = cardAdapter('a', { output: '9.5' })
-    const b = cardAdapter('b', { output: '9' })
+    const b = cardAdapter('b', { output: '9.45' })
     const t = make([a, b])
     const s = await t.session()
     const r = await t.quote(s)
@@ -353,12 +358,12 @@ describe('failover at start', () => {
   })
 
   it('tries at most 2 more quotes, then returns the first error and leaves no half state', async () => {
-    const all = ['a', 'b', 'c', 'd'].map((id, i) => cardAdapter(id, { output: String(9.5 - i / 10) }))
+    const all = ['a', 'b', 'c', 'd'].map((id, i) => cardAdapter(id, { output: String(9.5 - i / 100) }))
     const t = make(all)
     const s = await t.session()
     const r = await t.quote(s)
     all[0]!.ctl.startMode = 'unavailable'
-    for (const x of all.slice(1)) x.ctl.startMode = 'timeout'
+    for (const x of all.slice(1)) x.ctl.startMode = 'unavailable'
     const before = await (await t.call(`/sessions/${s.id}`, { secret: s.clientSecret })).json()
     const res = await t.post(`/sessions/${s.id}/select`, s.clientSecret, { quoteId: r.quotes[0]!.id })
     expect(res.status).toBe(502)
@@ -378,8 +383,8 @@ describe('failover at start', () => {
   it('skips expired quotes and quotes of an earlier quote request', async () => {
     vi.useFakeTimers({ now: Date.now(), toFake: ['Date'] })
     const a = cardAdapter('a', { output: '9.5' })
-    const b = cardAdapter('b', { output: '9', expiresInMs: 60_000 })
-    const c = cardAdapter('c', { output: '8' })
+    const b = cardAdapter('b', { output: '9.45', expiresInMs: 60_000 })
+    const c = cardAdapter('c', { output: '9.42' })
     const t = make([a, b, c])
     const s = await t.session()
     const old = await t.quote(s)
@@ -394,9 +399,34 @@ describe('failover at start', () => {
     expect(old.quotes.map((q) => q.id)).not.toContain(pub.payment.quoteId)
   })
 
+  it('never starts a quote with other terms: more than 1% less output, or another input', async () => {
+    const a = cardAdapter('a', { output: '9.5' })
+    const b = cardAdapter('b', { output: '9.3' })
+    const t = make([a, b])
+    const s = await t.session()
+    const r = await t.quote(s)
+    a.ctl.startMode = 'unavailable'
+    expect((await t.post(`/sessions/${s.id}/select`, s.clientSecret, { quoteId: r.quotes[0]!.id })).status).toBe(502)
+    expect(b.ctl.starts).toBe(0)
+    // Same output, but the stored input of B differs from the confirmed quote
+    const a2 = cardAdapter('a', { output: '9.5' })
+    const b2 = cardAdapter('b', { output: '9.5' })
+    const t2 = make([a2, b2])
+    const s2 = await t2.session()
+    const r2 = await t2.quote(s2)
+    const rec = (await t2.store.get(s2.id))!
+    const qb = r2.quotes.find((q) => q.legs[0]!.adapterId === 'b')!.id
+    rec.quotes[qb]!.quote.input = { ...rec.quotes[qb]!.quote.input, value: '10.5' }
+    await t2.store.put(rec, rec.version)
+    a2.ctl.startMode = 'unavailable'
+    const first = r2.quotes.find((q) => q.legs[0]!.adapterId === 'a')!.id
+    expect((await t2.post(`/sessions/${s2.id}/select`, s2.clientSecret, { quoteId: first })).status).toBe(502)
+    expect(b2.ctl.starts).toBe(0)
+  })
+
   it('skips quotes outside amountBounds', async () => {
     const a = cardAdapter('a', { output: '9.5' })
-    const b = cardAdapter('b', { output: '9' })
+    const b = cardAdapter('b', { output: '9.45' })
     const t = make([a, b])
     const s = await t.ramp.sessions.create({ userId: 'u', country: 'SG', destination: DEST, amountBounds: { min: '5', currency: 'SGD' } })
     await t.post(`/sessions/${s.id}/plan`, s.clientSecret)

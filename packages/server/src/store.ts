@@ -132,6 +132,8 @@ export type SessionRecord = {
   active?: ActivePayment
   /** Earlier attempts (after `restart`), oldest first */
   attempts?: PaymentAttempt[]
+  /** Adapters whose quote failure this session already counted in provider health (see `quotes`) */
+  healthFailed?: string[]
   step: Step
   /** start-URL tokens -> provider URL */
   startUrls: Record<string, { url: string; exp: number; keepReferrer?: boolean }>

@@ -94,7 +94,7 @@ In a [withdraw session](../guide/withdraw.md), the `wallet` leg sends the sessio
 
 ### Standing deposit addresses
 
-`standingAddress()` gives one Relay open deposit address per user and route, with the destination address as the recipient. The adapter keeps it in the shared store for 400 days after the last call. `standingDeposits()` reads the Relay requests of that address (`depositAddress=...&limit=20`). A request with status `waiting` and no deposit transaction is left out. A deposit's `legRef` is `sreq:<requestId>`, and `status()` reads that request by id. The refund address follows `refundTo`: for user wallets set `refundTo: 'recipient'`. See [Standing deposit addresses](../guide/deposit-addresses.md).
+`standingAddress()` gives one Relay open deposit address per user and route, with the destination address as the recipient. The adapter keeps it in the shared store for 400 days after the last call. `standingDeposits()` reads the Relay requests of that address (`depositAddress=...`, up to 5 pages of 20). It looks back 24 hours before `since`, because Relay can show a deposit transaction some time after it made the request. The server drops deposits it already has. A request with no deposit transaction yet is left out until Relay shows one, so every deposit id is a deposit transaction. A deposit's `legRef` is `sreq:<requestId>|<address>|<depositKey>`. Relay can re-quote a deposit under a new request id, so `status()` takes the newest request at the address for the same deposit transaction, and reads the request by id when it is not there. The refund address follows `refundTo`: for user wallets set `refundTo: 'recipient'`. See [Standing deposit addresses](../guide/deposit-addresses.md).
 
 ## Source tokens
 

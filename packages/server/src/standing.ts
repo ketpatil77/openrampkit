@@ -264,13 +264,22 @@ async function depositSession(rt: Runtime, addr: StandingRecord, a: Adapter, dep
   if (!won) {
     const cur = await kv.get<DepositClaim>(claimKey)
     // Another sweep may still be saving the session. Past CLAIM_STALE_MS it stopped: make the session
-    // here, with the same id.
+    // here, with the same id. One sweep only takes over a stale claim (a second atomic claim), and it
+    // writes its own claim, so the stopped sweep sees that and does not write the session later.
     if (cur && Date.now() - cur.at < CLAIM_STALE_MS) return 'pending'
     if (await rt.store.get(sid)) return 'exists'
+    const takeKey = `${claimKey}:take:${cur?.at ?? 0}`
+    const took = kv.putIfAbsent ? await kv.putIfAbsent(takeKey, mine, DEPOSIT_CLAIM_TTL_SEC) : !(await kv.get(takeKey)) && (await kv.put(takeKey, mine, DEPOSIT_CLAIM_TTL_SEC), true)
+    if (!took) return 'pending'
+    await kv.put(claimKey, mine, DEPOSIT_CLAIM_TTL_SEC)
     rt.log.warn('standing deposit: a claim with no session; making the session now', { addressId: addr.id, sessionId: sid })
   }
-  await createDepositSession(rt, addr, a, dep, sid)
-  return 'created'
+  // Right before the write: the claim is still this sweep's, and no session has the id yet.
+  const stillMine = async () => {
+    const c = await kv.get<DepositClaim>(claimKey)
+    return c?.at === mine.at && c.sessionId === sid && !(await rt.store.get(sid))
+  }
+  return (await createDepositSession(rt, addr, a, dep, sid, stillMine)) ? 'created' : 'pending'
 }
 
 /**
@@ -279,7 +288,7 @@ async function depositSession(rt: Runtime, addr: StandingRecord, a: Adapter, dep
  * is an `estimate` with the deposit as input and an output of 0 in the destination asset. The open
  * session list then polls `status(legRef)` until the leg ends.
  */
-async function createDepositSession(rt: Runtime, addr: StandingRecord, a: Adapter, dep: StandingDeposit, sid: string): Promise<void> {
+async function createDepositSession(rt: Runtime, addr: StandingRecord, a: Adapter, dep: StandingDeposit, sid: string, stillMine: () => Promise<boolean>): Promise<boolean> {
   const spec = transferLeg(a)
   if (!spec) throw new Error(`adapter ${a.id} has no transfer leg`)
   const input: CreateSessionInput = {
@@ -328,9 +337,14 @@ async function createDepositSession(rt: Runtime, addr: StandingRecord, a: Adapte
   addTimeline(rec, 'payment.started', { attempt: 0, method: 'transfer', provider: a.name })
   // Indexes the ref, records the step, and sends `session.processing`.
   await setLegStep(rt, rec, 0, { status: 'processing', detail: { code: 'processing' }, ref: dep.legRef })
+  if (!(await stillMine())) {
+    rt.log.warn('standing deposit: another sweep took the claim; not writing the session', { addressId: addr.id, sessionId: sid })
+    return false
+  }
   await saveSession(rt, rec, { create: true })
   rt.log.info('standing deposit: session created', { addressId: addr.id, sessionId: sid, adapter: a.id })
   rt.metric('standing.deposit', 1, { adapter: a.id })
+  return true
 }
 
 /** The wait before the next poll */

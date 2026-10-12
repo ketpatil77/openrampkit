@@ -116,19 +116,56 @@ describe('relay: standingAddress', () => {
 
 describe('relay: standingDeposits', () => {
   it('lists the requests at the address since a time, keyed by the deposit transaction', async () => {
-    const old = request('1', { createdAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString() })
+    // Older than the 24 h look-back before `since`: left out
+    const old = request('1', { createdAt: new Date(Date.now() - 30 * 60 * 60_000).toISOString() })
+    // Before `since` but inside the look-back (Relay indexed it late): kept
+    const late = request('4', { createdAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString() })
     const waiting = { id: 'w', status: 'waiting', createdAt: new Date().toISOString(), depositAddress: { address: ADDR } }
     const noHash = request('2', { depositAddress: { address: ADDR }, data: { metadata: {} }, status: 'pending' })
-    const { fetch, calls } = fakeFetch([{ method: 'GET', match: '/requests/v3', reply: () => ({ requests: [request('3'), noHash, waiting, old] }) }])
+    const { fetch, calls } = fakeFetch([{ method: 'GET', match: '/requests/v3', reply: () => ({ requests: [request('3'), noHash, waiting, late, old] }) }])
     const a = relay({ apiKey: 'k' })
     const out = await a.standingDeposits!({ ref: ADDR, address: ADDR, origin: ORIGIN, since: Date.now() - 60 * 60_000 }, { fetch, shared: memoryKV(), log: makeCtx({ fetch }).log })
     expect(calls[0]!.url).toContain(`depositAddress=${ADDR}`)
     expect(calls[0]!.url).toContain('limit=20')
+    const key = `tx:0x${'3'.padStart(64, '0')}`
     expect(out).toEqual([
-      { id: `tx:0x${'3'.padStart(64, '0')}`, legRef: 'sreq:3', at: expect.any(Number), input: { value: '10', asset: { kind: 'crypto', chain: ORIGIN.chain, token: ORIGIN.token } } },
-      // no deposit transaction yet, but Relay is working on it: keyed by the request id
-      { id: 'id:2', legRef: 'sreq:2', at: expect.any(Number) },
+      { id: key, legRef: `sreq:3|${ADDR}|${key}`, at: expect.any(Number), input: { value: '10', asset: { kind: 'crypto', chain: ORIGIN.chain, token: ORIGIN.token } } },
+      // A request with no deposit transaction yet waits for the next poll: every id is a deposit transaction.
+      { id: `tx:0x${'4'.padStart(64, '0')}`, legRef: `sreq:4|${ADDR}|tx:0x${'4'.padStart(64, '0')}`, at: expect.any(Number), input: expect.anything() },
     ])
+  })
+
+  it('reads more pages while the oldest request is inside the window, and stops at the look-back', async () => {
+    const recent = (id: string) => request(id)
+    const ancient = request('9', { createdAt: new Date(Date.now() - 30 * 60 * 60_000).toISOString() })
+    const { fetch, calls } = fakeFetch([
+      {
+        method: 'GET',
+        match: '/requests/v3',
+        reply: (c) => (new URL(c.url).searchParams.get('continuation') === 'p2' ? { requests: [recent('6'), ancient], continuation: 'p3' } : { requests: [recent('5')], continuation: 'p2' }),
+      },
+    ])
+    const out = await relay({ apiKey: 'k' }).standingDeposits!({ ref: ADDR, address: ADDR, origin: ORIGIN, since: Date.now() - 60_000 }, { fetch, shared: memoryKV(), log: makeCtx({ fetch }).log })
+    expect(out.map((d) => d.legRef.split('|')[0])).toEqual(['sreq:5', 'sreq:6'])
+    // Page 2 reached past the look-back, so there is no page 3
+    expect(calls).toHaveLength(2)
+  })
+})
+
+describe('relay: a standing deposit that Relay re-quotes', () => {
+  it('the status follows the newest request for the same deposit transaction', async () => {
+    const tx = `0x${'7'.padStart(64, '0')}`
+    const same = (id: string, status: string, ageMs: number) =>
+      request(id, { status, createdAt: new Date(Date.now() - ageMs).toISOString(), depositAddress: { address: ADDR, depositTxHash: tx }, data: { inTxs: [{ hash: tx }], outTxs: [{ hash: `0xout${id}` }], metadata: {} } })
+    const { fetch, calls } = fakeFetch([{ method: 'GET', match: '/requests/v3', reply: () => ({ requests: [same('new', 'success', 1_000), same('old', 'failure', 60_000)] }) }])
+    const ctx = makeCtx({ fetch, destination: DEST })
+    const a = relay({ apiKey: 'k' })
+    const [dep] = await a.standingDeposits!({ ref: ADDR, address: ADDR, origin: ORIGIN, since: 0 }, { fetch, shared: memoryKV(), log: ctx.log })
+    // One deposit, even with two requests
+    expect(dep!.id).toBe(`tx:${tx}`)
+    const oldRef = `sreq:old|${ADDR}|tx:${tx}`
+    expect(await a.status!({ leg: transferLeg, ref: oldRef }, ctx)).toMatchObject({ status: 'succeeded', transactions: expect.arrayContaining([{ role: 'destination', hash: '0xoutnew' }]) })
+    expect(calls.at(-1)!.url).toContain(`depositAddress=${ADDR}`)
   })
 })
 

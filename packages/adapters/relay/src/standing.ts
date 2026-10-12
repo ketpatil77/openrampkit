@@ -9,6 +9,7 @@ import type { Amount, CryptoAsset, LegStep } from '@openrampkit/core'
 import type { RelayRuntime } from './client.js'
 import { STANDING_ADDRESS_TTL_SEC } from './config.js'
 import type { DepositAddresses } from './deposit-address.js'
+import type { RelayRequest } from './types.js'
 import { addrKey, isSolana, relayOutput, sameAsset, toOpenRamp } from './helpers.js'
 
 type Ctx = Pick<AdapterContext, 'fetch' | 'log' | 'shared'>
@@ -16,14 +17,33 @@ type Ctx = Pick<AdapterContext, 'fetch' | 'log' | 'shared'>
 /** What the adapter keeps for one standing address */
 type StandingRecord = { address: string; refundTo: string; at: number }
 
-/** The ref of one deposit at a standing address: Relay's request id */
+/**
+ * The ref of one deposit at a standing address: `sreq:{requestId}|{address}|{depositKey}`. Relay can
+ * re-quote a deposit under a new request id, so the status follows the deposit (the address and the
+ * deposit transaction), and the request id is the fallback.
+ */
 export const STANDING_REF = 'sreq:'
+
+function standingRef(requestId: string, address: string, depositKey: string): string {
+  return `${STANDING_REF}${requestId}|${address}|${depositKey}`
+}
+
+function parseStandingRef(ref: string): { id: string; address?: string; depositKey?: string } {
+  const [id = '', address, depositKey] = ref.slice(STANDING_REF.length).split('|')
+  return { id, ...(address && depositKey ? { address, depositKey } : {}) }
+}
+
+/** How far before `since` a poll reads, for deposits that Relay indexed late (24 h) */
+const STANDING_LOOKBACK_MS = 24 * 60 * 60_000
+/** Requests per page, and the most pages one poll reads */
+const STANDING_PAGE_SIZE = 20
+const STANDING_MAX_PAGES = 5
 
 /** A store that keeps nothing: `depositQuote` then returns the new address of its quote. */
 const NO_CACHE: ScopedKV = { get: async () => undefined, put: async () => {} }
 
 export function standingAddresses(rt: RelayRuntime, deposits: DepositAddresses) {
-  const { listRequests, decimalsOf, refundTo } = rt
+  const { listRequests, listRequestsPage, decimalsOf, refundTo } = rt
   const { depositQuote, nominalAmount, requestKey, requestSourceTxHash, mapRequest } = deposits
 
   const norm = (chain: string, token: string) => (isSolana(chain) ? token : token.toLowerCase())
@@ -71,34 +91,64 @@ export function standingAddresses(rt: RelayRuntime, deposits: DepositAddresses) 
   }
 
   /**
-   * The Relay requests at a standing address since `since`, newest 20. A request with no deposit yet
-   * (status `waiting` and no transfer into the address) is left out: no money arrived. `id` is the
-   * deposit transaction (Relay can re-quote a deposit under a new request id), else the request id.
+   * The Relay requests at a standing address since `since` (with a look-back), newest first, up to 5
+   * pages of 20. A request with no deposit
+   * transaction yet is left out until Relay shows it: then no session exists before money arrived, and
+   * `id` is always the deposit transaction. Relay can re-quote a deposit under a new request id, and the
+   * same `id` keeps one deposit to one session.
    */
   async function standingDeposits(input: StandingDepositsInput, ctx: Ctx): Promise<StandingDeposit[]> {
-    const list = await listRequests(ctx, `depositAddress=${encodeURIComponent(input.address)}&limit=20`).catch((e) => {
-      throw toOpenRamp(e, ctx.log)
-    })
+    // Relay can index the deposit transaction of a request some time after it made the request. So this
+    // looks back STANDING_LOOKBACK_MS before `since`, and the server drops deposits it already has.
+    const floor = input.since - STANDING_LOOKBACK_MS
+    const list: RelayRequest[] = []
+    let continuation: string | undefined
+    for (let page = 0; page < STANDING_MAX_PAGES; page++) {
+      const q = `depositAddress=${encodeURIComponent(input.address)}&limit=${STANDING_PAGE_SIZE}${continuation ? `&continuation=${encodeURIComponent(continuation)}` : ''}`
+      const res = await listRequestsPage(ctx, q).catch((e) => {
+        throw toOpenRamp(e, ctx.log)
+      })
+      list.push(...res.requests)
+      const oldest = Math.min(...res.requests.map((r) => Date.parse(r?.createdAt ?? '')).filter(Number.isFinite))
+      continuation = res.continuation
+      if (!continuation || !res.requests.length || oldest < floor) break
+      if (page === STANDING_MAX_PAGES - 1) ctx.log.warn('relay: more requests at a standing address than one poll reads', { address: input.address })
+    }
     const origin: Amount = { value: '0', asset: { kind: 'crypto', chain: input.origin.chain, token: input.origin.token } }
     const out: StandingDeposit[] = []
     for (const r of list) {
       if (typeof r?.id !== 'string' || !r.id || typeof r.createdAt !== 'string') continue
       const at = Date.parse(r.createdAt)
-      if (!Number.isFinite(at) || at < input.since) continue
-      if (r.status === 'waiting' && !requestSourceTxHash(r)) continue
+      if (!Number.isFinite(at) || at < floor) continue
+      if (!requestSourceTxHash(r)) continue
       const amount = relayOutput(r.data?.metadata?.currencyIn, origin)
-      out.push({ id: requestKey(r), legRef: `${STANDING_REF}${r.id}`, at, ...(amount ? { input: amount } : {}) })
+      const key = requestKey(r)
+      out.push({ id: key, legRef: standingRef(r.id, input.address, key), at, ...(amount ? { input: amount } : {}) })
     }
     return out
   }
 
-  /** The step of one deposit at a standing address, from its Relay request. Until Relay lists it, the deposit is processing. */
+  /**
+   * The step of one deposit at a standing address. It reads the requests at the address and takes the
+   * newest one for the same deposit transaction (a re-quote replaces the first request), else the request
+   * by id. Until Relay lists it, the deposit is processing.
+   */
   async function standingStatus(ctx: AdapterContext, ref: string): Promise<LegStep> {
-    const id = ref.slice(STANDING_REF.length)
-    const list = await listRequests(ctx, `id=${encodeURIComponent(id)}`).catch((e) => {
+    const { id, address, depositKey } = parseStandingRef(ref)
+    const fail = (e: unknown) => {
       throw toOpenRamp(e, ctx.log)
-    })
-    const r = list.find((x) => typeof x?.id === 'string' && x.id.toLowerCase() === id.toLowerCase())
+    }
+    let r: RelayRequest | undefined
+    if (address && depositKey) {
+      const atAddress = await listRequests(ctx, `depositAddress=${encodeURIComponent(address)}&limit=20`).catch(fail)
+      r = atAddress
+        .filter((x) => typeof x?.id === 'string' && requestKey(x) === depositKey)
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0]
+    }
+    if (!r) {
+      const byId = await listRequests(ctx, `id=${encodeURIComponent(id)}`).catch(fail)
+      r = byId.find((x) => typeof x?.id === 'string' && x.id.toLowerCase() === id.toLowerCase())
+    }
     if (!r) return { status: 'processing', detail: { code: 'processing' }, ref, providerRef: id }
     // The destination asset, so that Relay's output takes the session's asset (see `relayOutput`).
     const d = ctx.destination

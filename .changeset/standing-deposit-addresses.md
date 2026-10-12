@@ -12,4 +12,4 @@ Standing deposit addresses: one permanent deposit address per user and route.
 - New webhook event `deposit_address.deposit` (`depositAddressId`, `sessionId`, `depositId`, `input`). Such a session has `standingAddressId`, and its failure is final.
 - Core: the `StandingAddress` type, and `Session.standingAddressId`.
 - Adapter API: two optional methods, `standingAddress()` and `standingDeposits()`. `checkAdapterShape` checks that they come together with `status()` and a `transfer` leg.
-- Relay: standing addresses are Relay open deposit addresses. A deposit's ref is `sreq:<requestId>`.
+- Relay: standing addresses are Relay open deposit addresses. A deposit is keyed by its deposit transaction, and its status follows a re-quote under a new request id. Each poll looks back 24 hours, over up to 5 pages.

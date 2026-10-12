@@ -49,10 +49,15 @@ export function createRuntime(opts: RelayOptions) {
 
   /** Relay requests (`GET /requests/v3` with a key, else the deprecated `/requests/v2`) */
   async function listRequests(ctx: Pick<AdapterContext, 'fetch' | 'log'>, query: string): Promise<RelayRequest[]> {
+    return (await listRequestsPage(ctx, query)).requests
+  }
+
+  /** One page of Relay requests, with the `continuation` token of the next page when there is one */
+  async function listRequestsPage(ctx: Pick<AdapterContext, 'fetch' | 'log'>, query: string): Promise<{ requests: RelayRequest[]; continuation?: string }> {
     warnNoKey(ctx.log)
     const path = opts.apiKey ? '/requests/v3' : '/requests/v2'
-    const res = await api<{ requests?: RelayRequest[] }>(ctx, `${path}?${query}`)
-    return res.requests ?? []
+    const res = await api<{ requests?: RelayRequest[]; continuation?: string }>(ctx, `${path}?${query}`)
+    return { requests: res.requests ?? [], ...(typeof res.continuation === 'string' && res.continuation ? { continuation: res.continuation } : {}) }
   }
 
   async function decimalsOf(ctx: Pick<AdapterContext, 'fetch' | 'shared'> & Partial<Pick<AdapterContext, 'log'>>, asset: CryptoAsset): Promise<number> {
@@ -114,5 +119,5 @@ export function createRuntime(opts: RelayOptions) {
     return rpc<SolTx | null>(ctx, chain, 'getTransaction', [signature, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }])
   }
 
-  return { opts, toleranceBps, slippageBps, logBlockRange, warnNoKey, api, listRequests, decimalsOf, refundTo, baseBody, rpc, solanaTx }
+  return { opts, toleranceBps, slippageBps, logBlockRange, warnNoKey, api, listRequests, listRequestsPage, decimalsOf, refundTo, baseBody, rpc, solanaTx }
 }

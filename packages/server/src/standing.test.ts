@@ -327,6 +327,31 @@ describe('sweep: one session per deposit', () => {
   })
 })
 
+describe('sweep: a stale claim', () => {
+  it('one sweep takes over a stale claim and writes its own claim; a stopped sweep then does not write', async () => {
+    vi.useFakeTimers({ now: Date.now(), toFake: ['Date'] })
+    const t = make()
+    await t.get()
+    t.fake.deposits.push(deposit('d1'))
+    // A claim from a sweep that stopped 3 minutes ago, with no session
+    const kv = t.store.kv
+    const keys: string[] = []
+    const realPut = kv.putIfAbsent!.bind(kv)
+    kv.putIfAbsent = async (k, v, ttl) => {
+      if (k.startsWith('standingdep:') && !k.includes(':take:')) {
+        keys.push(k)
+        await kv.put(k, { sessionId: 'stale', at: Date.now() - 3 * 60_000 }, ttl)
+        return false
+      }
+      return realPut(k, v, ttl)
+    }
+    expect((await t.ramp.sweep()).standing.deposits).toBe(1)
+    expect(t.depositSessions()).toHaveLength(1)
+    // The claim now names this sweep, so the stopped sweep's check before its write fails
+    expect(await kv.get<{ sessionId: string }>(keys[0]!)).toMatchObject({ sessionId: expect.stringMatching(/^ors_/) })
+  })
+})
+
 describe('sweep: poll backoff and the 90-day stop', () => {
   it('polls every 30 s after a deposit, doubles to 10 minutes when idle, and a get starts again fast', async () => {
     vi.useFakeTimers({ now: Date.parse('2026-10-10T00:00:00Z'), toFake: ['Date'] })

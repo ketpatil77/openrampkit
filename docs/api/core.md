@@ -339,7 +339,7 @@ Compares two strings in constant time for a given length, for tokens and signatu
 | `destinationEndpoint(destination)` | The target endpoint |
 | `withdrawSourceEndpoint(source)` | The endpoint a withdrawal starts from: the source asset in the user's wallet, or at the app's address |
 | `assetMatches(matcher, asset)`, `endpointMatches(matcher, endpoint)` | Matching helpers |
-| `rankQuotes(quotes)` | Most output first, then fastest; adds `best_price` and `fastest` badges |
+| `rankQuotes(quotes, { successRate? })` | Most output first, then fastest, then the higher `successRate(q)` (0 to 1, when given), then the input order; adds `best_price` and `fastest` badges |
 
 ```ts
 type PlannerInput = {

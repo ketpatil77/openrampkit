@@ -7,10 +7,27 @@ import type { Runtime } from './runtime.js'
 import { scopedKV } from './store.js'
 import type { SessionRecord, StoredQuote } from './store.js'
 import { withdrawSender } from './withdraw.js'
+import { breakerError, breakerGate, breakerProbeResult, isProviderFailure, recordHealth, successRates } from './health.js'
+import type { HealthCounts } from './health.js'
 
 export type PlanBody = { walletConnected?: boolean; surfaces?: SurfaceKind[] }
 export type QuotesBody = { method: string; amount: string; amountSide?: 'source' | 'destination'; source?: { chain: string; token: string } }
 type Source = { chain: string; token: string; address?: string }
+
+/**
+ * The quote outcomes of one quote request, per adapter, written to provider health once at the end.
+ * `inFlight` is the adapter that a pathway is quoting now: when the pathway times out, that adapter
+ * gets the failure. Outcomes that arrive after `closed` (a quote that ends after its timeout) are dropped.
+ */
+type QuoteTally = { counts: Map<string, Partial<HealthCounts>>; closed: boolean }
+type PathwayTrack = { tally: QuoteTally; inFlight?: string }
+
+function tallyAdd(t: QuoteTally, adapterId: string, key: 'quoteOk' | 'quoteFail'): void {
+  if (t.closed) return
+  const c = t.counts.get(adapterId) ?? {}
+  c[key] = (c[key] ?? 0) + 1
+  t.counts.set(adapterId, c)
+}
 
 /** Collect leg specs (live catalogs when available), run the planner, apply the session's method allow list. */
 export async function plan(rt: Runtime, rec: SessionRecord, body: PlanBody): Promise<PlanResult> {
@@ -71,14 +88,14 @@ async function deliveryAddresses(rt: Runtime, rec: SessionRecord, p: Pathway): P
  * `destination` amounts are only supported on one-leg pathways (a chained exact-output quote
  * would need a reverse pass); multi-leg pathways quote the given amount as the source amount.
  */
-export async function quotePathway(rt: Runtime, rec: SessionRecord, p: Pathway, amount: string, side: 'source' | 'destination', source?: Source): Promise<{ quote: Quote; stored: StoredQuote }> {
+export async function quotePathway(rt: Runtime, rec: SessionRecord, p: Pathway, amount: string, side: 'source' | 'destination', source?: Source, track?: PathwayTrack): Promise<{ quote: Quote; stored: StoredQuote }> {
   const deliverTo = await deliveryAddresses(rt, rec, p)
   const legQuotes: LegQuote[] = []
   if (side === 'destination' && p.legs.length === 1) {
     const leg = p.legs[0]!
     const a = rt.adapter(leg.adapterId)
     legQuotes.push(
-      await timed(rt, a.id, () => a.quote(
+      await timed(rt, a.id, track, () => a.quote(
         { leg, amountOut: { value: amount, asset: leg.to.asset }, ...(deliverTo[0] ? { deliverTo: deliverTo[0] } : {}), ...(source ? { source } : {}) },
         adapterContext(rt, rec, a, p, 0),
       )),
@@ -96,7 +113,7 @@ export async function quotePathway(rt: Runtime, rec: SessionRecord, p: Pathway, 
               asset: source && leg.from.asset.kind === 'crypto' && leg.from.asset.chain === '*' ? { kind: 'crypto', chain: source.chain, token: source.token } : leg.from.asset,
             }
           : nextIn!
-      const q = await timed(rt, a.id, () => a.quote(
+      const q = await timed(rt, a.id, track, () => a.quote(
         { leg, amountIn, ...(deliverTo[i] ? { deliverTo: deliverTo[i]! } : {}), ...(i === 0 && source ? { source } : {}) },
         adapterContext(rt, rec, a, p, i),
       ))
@@ -108,16 +125,25 @@ export async function quotePathway(rt: Runtime, rec: SessionRecord, p: Pathway, 
   return { quote, stored: { quote, pathway: p, deliverTo } }
 }
 
-/** Run one adapter quote and report its latency (`quote.latency_ms`, tags `adapter` and `ok`). */
-async function timed<T>(rt: Runtime, adapter: string, run: () => Promise<T>): Promise<T> {
+/**
+ * Run one adapter quote and report its latency (`quote.latency_ms`, tags `adapter` and `ok`). With a
+ * `track`, count the outcome for provider health: an error in `NOT_PROVIDER_FAILURE` (for example
+ * AMOUNT_TOO_LOW) is an answer, not a failure, so it counts as neither.
+ */
+async function timed<T>(rt: Runtime, adapter: string, track: PathwayTrack | undefined, run: () => Promise<T>): Promise<T> {
   const t0 = Date.now()
+  if (track) track.inFlight = adapter
   try {
     const out = await run()
     rt.metric('quote.latency_ms', Date.now() - t0, { adapter, ok: 'true' })
+    if (track) tallyAdd(track.tally, adapter, 'quoteOk')
     return out
   } catch (e) {
     rt.metric('quote.latency_ms', Date.now() - t0, { adapter, ok: 'false' })
+    if (track && isProviderFailure(e)) tallyAdd(track.tally, adapter, 'quoteFail')
     throw e
+  } finally {
+    if (track) track.inFlight = undefined
   }
 }
 
@@ -193,11 +219,33 @@ export async function quotes(rt: Runtime, rec: SessionRecord, body: QuotesBody):
         ? { ...body.source, ...(rec.walletAddress ? { address: rec.walletAddress } : {}) }
         : undefined
   const timeout = rt.config.timeouts?.quote ?? 9000
-  const settled = await Promise.allSettled(
-    candidates.slice(0, MAX_QUOTED_PATHWAYS).map((p) => withTimeout(quotePathway(rt, rec, p, body.amount, body.amountSide ?? 'source', source), timeout)),
-  )
-  const out: Quote[] = []
   const errors: OpenRampError[] = []
+  // The circuit breaker: skip pathways with an adapter that fails too often now (no network call).
+  const gates = new Map<string, 'closed' | 'open' | 'probe'>()
+  await Promise.all([...new Set(candidates.flatMap((p) => p.legs.map((l) => l.adapterId)))].map(async (id) => gates.set(id, await breakerGate(rt, id))))
+  const open = candidates.filter((p) => p.legs.some((l) => gates.get(l.adapterId) === 'open'))
+  for (const p of open) {
+    errors.push(breakerError(p.provider))
+    rt.metric('quote.skipped', 1, { adapter: p.legs.find((l) => gates.get(l.adapterId) === 'open')!.adapterId, reason: 'breaker' })
+  }
+  const quoted = candidates.filter((p) => !open.includes(p)).slice(0, MAX_QUOTED_PATHWAYS)
+  const tally: QuoteTally = { counts: new Map(), closed: false }
+  const tracks = quoted.map((): PathwayTrack => ({ tally }))
+  const settled = await Promise.allSettled(
+    quoted.map((p, i) => withTimeout(quotePathway(rt, rec, p, body.amount, body.amountSide ?? 'source', source, tracks[i]), timeout)),
+  )
+  // A pathway that timed out while an adapter quote was open: that adapter failed.
+  for (const t of tracks) if (t.inFlight) tallyAdd(tally, t.inFlight, 'quoteFail')
+  tally.closed = true
+  await Promise.all([
+    ...[...tally.counts].map(([id, c]) => recordHealth(rt, id, c)),
+    ...[...gates].filter(([, g]) => g === 'probe').map(async ([id]) => {
+      const c = tally.counts.get(id)
+      // No outcome (for example an earlier leg failed): the breaker stays as it is.
+      if (c?.quoteOk || c?.quoteFail) await breakerProbeResult(rt, id, !!c.quoteOk)
+    }),
+  ])
+  const out: Quote[] = []
   for (const s of settled) {
     if (s.status === 'fulfilled') {
       const bounds = boundsError(rec, s.value.stored.quote.input)
@@ -215,8 +263,32 @@ export async function quotes(rt: Runtime, rec: SessionRecord, body: QuotesBody):
       rt.log.warn('quote failed', { error: message })
     }
   }
+  const ranked = await rankWithHealth(rt, rec, out)
+  // Failover at start picks the next quote of the same request, in this order.
+  const round = randomHex(6)
+  ranked.forEach((q, i) => {
+    const stored = rec.quotes[q.id]
+    if (stored) Object.assign(stored, { round, rank: i })
+  })
   pruneQuotes(rec)
-  return { quotes: rankQuotes(out).map(publicQuote), errors }
+  return { quotes: ranked.map(publicQuote), errors }
+}
+
+/**
+ * Rank with `rankQuotes`, with the providers' recent success rates as the tie break after the output
+ * and the ETA. A pathway's rate is the product of its legs' rates. An adapter with too few samples is
+ * neutral: it takes the mean rate of the rated adapters in this list. With no rated adapter, no rates.
+ */
+async function rankWithHealth(rt: Runtime, rec: SessionRecord, out: Quote[]): Promise<Quote[]> {
+  if (out.length < 2) return rankQuotes(out)
+  // The adapters from the planner's pathway, not from the adapter's own quote.
+  const adaptersOf = (q: Quote) => rec.quotes[q.id]?.pathway.legs.map((l) => l.adapterId) ?? []
+  const ids = [...new Set(out.flatMap(adaptersOf))]
+  const rates = await successRates(rt, ids)
+  const known = [...rates.values()].filter((r): r is number => r !== undefined)
+  if (!known.length) return rankQuotes(out)
+  const neutral = known.reduce((a, b) => a + b, 0) / known.length
+  return rankQuotes(out, { successRate: (q) => adaptersOf(q).reduce((acc, id) => acc * (rates.get(id) ?? neutral), 1) })
 }
 
 function pruneQuotes(rec: SessionRecord) {

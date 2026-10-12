@@ -42,6 +42,10 @@ export type StoredQuote = {
   quote: Quote
   pathway: Pathway
   deliverTo: Array<{ address: string } | undefined>
+  /** The quote request that made it. Start failover only picks quotes of the same request. */
+  round?: string
+  /** Its place in the ranked list of that request, 0 first */
+  rank?: number
 }
 
 /** The payment in progress: the selected quote's pathway and its legs */

@@ -377,6 +377,7 @@ The routes for operators. See [Admin and observability](../guide/admin.md).
 | `POST` | `/admin/sessions/:id/resolve` | Body `{ "state": "COMPLETED" \| "FAILED" \| "REFUNDED" \| "EXPIRED", "note": "..." }`. Answer: the `AdminSession` view. `400` without a note, `404` for an unknown session, `409` when the session already has that state. |
 | `POST` | `/admin/sessions/:id/replay` | `{ "queued": 1 }`: the dead letters sent again. `404` for an unknown session. |
 | `GET` | `/admin/stats` | `AdminStats`. Query: `since` (ISO 8601 or ms; default 24 hours ago). |
+| `GET` | `/admin/providers` | `{ providers: ProviderHealth[] }`: counts, success rate, recent failure rate and circuit breaker state per adapter. See [Provider health](./server.md#provider-health). |
 | `GET` | `/admin/find` | `{ sessions: [...] }`. Query: `provider` and `ref`, or `tx` and an optional `chain`. `tx` finds a transaction of any role (approval, source, hop, destination, settlement, refund) in any payment attempt; with `chain`, the transaction must be on that chain. |
 
 The list, stats and tx search answer `501` when the store queue has no `range` (a custom store). See [The time index](../guide/admin.md#the-time-index-and-its-limits).

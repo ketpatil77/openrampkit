@@ -1,5 +1,5 @@
 // Admin tools for operators: a time index of sessions, list and lookup, stats, forced final states with
-// an audit note, and webhook replay. `openramp.admin.*` calls these directly; the HTTP routes under
+// an audit note, webhook replay and provider health (see health.ts). `openramp.admin.*` calls these directly; the HTTP routes under
 // `{baseUrl}/admin/*` need `admin.token`.
 //
 // The time index: stores have no queries, so each new session id goes on a day queue
@@ -19,6 +19,7 @@ import { claimToken, OPEN_QUEUE, OUTBOX_QUEUE, queueOf } from './queue.js'
 import type { Runtime } from './runtime.js'
 import type { ActivePayment, OutboxEvent, PaymentAttempt, QueueItem, Resolution, Reversal, SessionRecord, TimelineEntry } from './store.js'
 import { addTimeline } from './timeline.js'
+import { providerHealth } from './health.js'
 
 const DAY_MS = 24 * 60 * 60_000
 const INDEX_PREFIX = 'admin-index:'
@@ -600,6 +601,7 @@ export async function adminRoute(rt: Runtime, req: Request, method: string, rest
   const url = new URL(req.url)
   const p = url.searchParams
   if (head === 'stats' && !id && method === 'GET') return send(await adminStats(rt, p.get('since') ? { since: /^\d+$/.test(p.get('since')!) ? Number(p.get('since')) : p.get('since')! } : {}))
+  if (head === 'providers' && !id && method === 'GET') return send({ providers: await providerHealth(rt) })
   if (head === 'find' && !id && method === 'GET') {
     if (p.get('tx')) return send({ sessions: await adminFindByTx(rt, p.get('chain') ?? undefined, p.get('tx')!) })
     const found = await adminFindByRef(rt, p.get('provider') ?? '', p.get('ref') ?? '')

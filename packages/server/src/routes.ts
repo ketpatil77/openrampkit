@@ -6,7 +6,8 @@ import type { SurfaceKind } from '@openrampkit/core'
 import { safeEqual, sha256Hex } from './crypto.js'
 import { MAX_WEBHOOK_BODY_BYTES } from './config.js'
 import { clientIp, errorResponse, geoOf, json, readJson, readText, withIdempotency } from './http.js'
-import { adapterMoveAllowed, applyEvent, archiveActive, beginPayment, moneyMayHaveMoved, refreshActive, setLegStep, startSignature } from './legs.js'
+import { adapterMoveAllowed, applyEvent, archiveActive, beginPayment, moneyMayHaveMoved, refreshActive, setLegStep, startSignature, startThrew } from './legs.js'
+import { canFailOver } from './health.js'
 import { plan, quotes, boundsError } from './planning.js'
 import type { QuotesBody } from './planning.js'
 import { saveSession } from './outbox.js'
@@ -20,7 +21,7 @@ import { sweep } from './tasks.js'
 import { adminRoute } from './admin.js'
 import { addTimeline } from './timeline.js'
 import { scopedKV } from './store.js'
-import type { SessionRecord } from './store.js'
+import type { SessionRecord, StoredQuote } from './store.js'
 import { CAIP2, checkAllowed, isValidToken, parseTarget, screenTarget, targetDestination } from './withdraw.js'
 
 const RETURN_PAGE =
@@ -238,9 +239,70 @@ async function selectRoute(rt: Runtime, req: Request, rec: SessionRecord): Promi
   if (bounds) return errorResponse(bounds, 422)
   const walletAddress = walletAddressOf(body.walletAddress)
   if (walletAddress) rec.walletAddress = walletAddress
-  await beginPayment(rt, rec, body.quoteId, stored)
+  await startWithFailover(rt, rec, body.quoteId, stored)
   await saveSession(rt, rec)
   return json(publicSession(rec))
+}
+
+/** Most other quotes that one select tries after the chosen quote failed to start */
+const MAX_FAILOVERS = 2
+
+/**
+ * Begin the payment. When the first leg's `start()` throws a provider failure (see `canFailOver`), try
+ * the next best quote of the same quote request and method, from another adapter, at most
+ * `MAX_FAILOVERS` times. Each try is a full `beginPayment`, which rolls back when it fails, so a failed
+ * try leaves nothing behind. Money safety: only an error that `start()` threw fails over. When `start()`
+ * returned a step, the provider has an order, and the error goes to the caller as before. When every
+ * try fails, the caller gets the first error.
+ */
+async function startWithFailover(rt: Runtime, rec: SessionRecord, quoteId: string, stored: StoredQuote): Promise<void> {
+  try {
+    await beginPayment(rt, rec, quoteId, stored)
+    return
+  } catch (first) {
+    if (!startThrew(first) || !canFailOver(first)) throw first
+    const tried = new Set([quoteId])
+    const failed = new Set([stored.pathway.legs[0]!.adapterId])
+    let from = stored.pathway.legs[0]!.adapterId
+    for (let n = 0; n < MAX_FAILOVERS; n++) {
+      const next = nextQuote(rec, stored, tried, failed)
+      if (!next) break
+      const to = next.stored.pathway.legs[0]!.adapterId
+      tried.add(next.id)
+      addTimeline(rec, 'payment.failover', { from, to, quoteId: next.id })
+      rt.metric('payment.failover', 1, { from, to })
+      rt.log.warn('payment start failed; trying the next quote', { sessionId: rec.id, from, to })
+      try {
+        await beginPayment(rt, rec, next.id, next.stored)
+        return
+      } catch (e) {
+        if (!startThrew(e) || !canFailOver(e)) break
+        failed.add(to)
+        from = to
+      }
+    }
+    throw first
+  }
+}
+
+/**
+ * The best quote left for a failover: same quote request (`round`) and method, a first leg from an
+ * adapter that did not fail, not expired, and inside the session's `amountBounds`. Lowest `rank` first.
+ */
+function nextQuote(rec: SessionRecord, chosen: StoredQuote, tried: Set<string>, failed: Set<string>): { id: string; stored: StoredQuote } | undefined {
+  if (chosen.round === undefined) return undefined
+  const now = Date.now()
+  return Object.entries(rec.quotes)
+    .filter(([id, q]) =>
+      !tried.has(id) &&
+      q.round === chosen.round &&
+      q.pathway.method === chosen.pathway.method &&
+      !failed.has(q.pathway.legs[0]!.adapterId) &&
+      !(q.quote.expiresAt && Date.parse(q.quote.expiresAt) < now) &&
+      !boundsError(rec, q.quote.input),
+    )
+    .sort(([, a], [, b]) => (a.rank ?? 0) - (b.rank ?? 0))
+    .map(([id, q]) => ({ id, stored: q }))[0]
 }
 
 async function transitionRoute(rt: Runtime, req: Request, rec: SessionRecord, name: string): Promise<Response> {

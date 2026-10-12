@@ -13,6 +13,7 @@ import { addTimeline } from './timeline.js'
 import type { Runtime } from './runtime.js'
 import type { ActiveLeg, ActivePayment, SessionRecord, StoredQuote } from './store.js'
 import { withdrawSender } from './withdraw.js'
+import { isProviderFailure, recordHealth } from './health.js'
 
 /** The AWAIT transition of a step with no action: the client checks the status on this schedule */
 const pollTransitions = (ls: LegStep) => [{ name: 'poll', kind: 'AWAIT' as const, poll: ls.poll ?? DEFAULT_POLL }]
@@ -507,6 +508,8 @@ export async function setLegStep(rt: Runtime, rec: SessionRecord, i: number, ls:
   const before = leg.step?.status
   const wasExpired = rec.step.state === 'EXPIRED'
   if (before !== wrapped.status) {
+    // Provider health counts each leg's final outcome once (a retried save after a conflict can count it twice).
+    if (wrapped.status === 'succeeded' || wrapped.status === 'failed') await recordHealth(rt, leg.adapterId, wrapped.status === 'succeeded' ? { legSucceeded: 1 } : { legFailed: 1 })
     addTimeline(rec, `leg.${wrapped.status}`, {
       index: i,
       adapterId: leg.adapterId,
@@ -602,16 +605,36 @@ export async function startLeg(rt: Runtime, rec: SessionRecord, i: number): Prom
         : rec.walletAddress && input.kind === 'crypto'
           ? { chain: input.chain, token: input.token, address: rec.walletAddress }
           : undefined
-  const ls = await a.start(
-    {
-      leg: act.pathway.legs[i]!,
-      quote: leg.quote,
-      ...(leg.deliverTo ? { deliverTo: leg.deliverTo } : {}),
-      ...(source ? { source } : {}),
-    },
-    adapterContext(rt, rec, a, act.pathway, i),
-  )
+  let ls: LegStep
+  try {
+    ls = await a.start(
+      {
+        leg: act.pathway.legs[i]!,
+        quote: leg.quote,
+        ...(leg.deliverTo ? { deliverTo: leg.deliverTo } : {}),
+        ...(source ? { source } : {}),
+      },
+      adapterContext(rt, rec, a, act.pathway, i),
+    )
+  } catch (e) {
+    if (isProviderFailure(e)) await recordHealth(rt, a.id, { startFail: 1 })
+    if (typeof e === 'object' && e !== null) START_THREW.add(e)
+    throw e
+  }
+  await recordHealth(rt, a.id, { startOk: 1 })
   await setLegStep(rt, rec, i, ls)
+}
+
+/**
+ * Errors thrown by an adapter's `start()` itself. Only these may fail over to another quote: when
+ * `start()` returned a step, the provider has an order (and money may move), so the server never
+ * starts another provider for the same payment.
+ */
+const START_THREW = new WeakSet<object>()
+
+/** True when `e` came from an adapter's `start()`, before it returned any step. */
+export function startThrew(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && START_THREW.has(e)
 }
 
 /** Most attempts kept per session. The oldest one goes first. */

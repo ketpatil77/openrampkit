@@ -135,6 +135,16 @@ describe('provider health counts', () => {
     expect((await t.health('a')).counts.legSucceeded).toBe(1)
   })
 
+  it('parallel quote requests of one session count one failure per adapter', async () => {
+    const a = cardAdapter('a', { output: '9' })
+    const b = cardAdapter('b', { output: '8' })
+    b.ctl.quoteMode = 'unavailable'
+    const t = make([a, b])
+    const s = await t.session()
+    await Promise.all([t.quote(s, '10'), t.quote(s, '11'), t.quote(s, '12'), t.quote(s, '13')])
+    expect((await t.health('b')).counts.quoteFail).toBe(1)
+  })
+
   it('keeps hourly buckets for the window only', async () => {
     vi.useFakeTimers({ now: Date.now(), toFake: ['Date'] })
     const t = make([cardAdapter('a')], { routing: { healthWindowHours: 3 } })

@@ -7,7 +7,7 @@ import type { Runtime } from './runtime.js'
 import { scopedKV } from './store.js'
 import type { SessionRecord, StoredQuote } from './store.js'
 import { withdrawSender } from './withdraw.js'
-import { breakerError, breakerGate, breakerProbeResult, isProviderFailure, recordHealth, successRates } from './health.js'
+import { breakerError, breakerGate, breakerProbeResult, isProviderFailure, recordHealth, routingOptions, successRates } from './health.js'
 import type { HealthCounts } from './health.js'
 
 export type PlanBody = { walletConnected?: boolean; surfaces?: SurfaceKind[] }
@@ -204,6 +204,23 @@ function publicLegQuote(l: LegQuote): PublicLegQuote {
 }
 
 /**
+ * True for the first quote failure of `adapterId` in this session. Atomic with `putIfAbsent`; a store
+ * without it (Workers KV) does a read, then a write, so two requests at the same moment can both count.
+ */
+async function firstFailureOfSession(rt: Runtime, sessionId: string, adapterId: string): Promise<boolean> {
+  const key = `healthfail:${sessionId}:${adapterId}`
+  const ttl = routingOptions(rt).windowHours * 3600
+  try {
+    if (rt.store.kv.putIfAbsent) return await rt.store.kv.putIfAbsent(key, 1, ttl)
+    if (await rt.store.kv.get(key)) return false
+    await rt.store.kv.put(key, 1, ttl)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Quote up to MAX_QUOTED_PATHWAYS pathways for a method in parallel. Failures become errors, not exceptions.
  * Returns the public view of each quote (see `publicQuote`); the full quotes go into `rec.quotes`.
  */
@@ -239,11 +256,12 @@ export async function quotes(rt: Runtime, rec: SessionRecord, body: QuotesBody):
   tally.closed = true
   // One session counts at most one quote failure per adapter, so the browser of one session (it picks
   // the amount and the token) cannot push an adapter's failure rate up and open the breaker for everyone.
-  for (const [id, c] of tally.counts) {
-    if (!c.quoteFail) continue
-    if (rec.healthFailed?.includes(id)) c.quoteFail = 0
-    else rec.healthFailed = [...(rec.healthFailed ?? []), id]
-  }
+  // The mark is an atomic claim in the store, so parallel quote requests of one session count once too.
+  await Promise.all(
+    [...tally.counts].map(async ([id, c]) => {
+      if (c.quoteFail && !(await firstFailureOfSession(rt, rec.id, id))) c.quoteFail = 0
+    }),
+  )
   await Promise.all([
     ...[...tally.counts].map(([id, c]) => recordHealth(rt, id, c)),
     ...[...gates].filter(([, g]) => g === 'probe').map(async ([id]) => {

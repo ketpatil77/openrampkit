@@ -8,7 +8,7 @@ import type { Amount, CryptoAsset, LegQuote, LegStep } from '@openrampkit/core'
 import type { RelayRuntime } from './client.js'
 import { DEPOSIT_ADDRESS_TTL_SEC, RECORD_TTL_SEC, USED_TTL_SEC } from './config.js'
 import type { DirectTransfer } from './direct-transfer.js'
-import { POLL_TRANSITION, addrKey, cryptoAsset, isSolana, knownDecimals, knownSymbol, quoteUser, recipientOf, relayOutput, relayStep, relayTransactions, requestIdOf, sameAsset, toOpenRamp } from './helpers.js'
+import { POLL_TRANSITION, addrKey, cryptoAsset, isSolana, knownDecimals, knownSymbol, quoteUser, recipientOf, refundsToSender, relayOutput, relayStep, relayTransactions, requestIdOf, sameAsset, toOpenRamp } from './helpers.js'
 import type { DepositRecord, RelayQuoteResponse, RelayRequest } from './types.js'
 
 export type DepositAddresses = ReturnType<typeof depositAddresses>
@@ -19,9 +19,14 @@ export function depositAddresses(rt: RelayRuntime, direct: DirectTransfer) {
 
   // ---------- open deposit addresses ----------
 
-  function depositKey(recipient: string, origin: CryptoAsset, dest: CryptoAsset) {
+  /**
+   * Store key of a session's address for a route. Relay binds the refund address to the deposit address,
+   * so an address that refunds elsewhere than the sender gets its own key (the default keeps the old key).
+   */
+  function depositKey(recipient: string, origin: CryptoAsset, dest: CryptoAsset, refund?: string) {
     const norm = (chain: string, token: string) => (isSolana(chain) ? token : token.toLowerCase())
-    return `da:${addrKey(recipient)}:${origin.chain}:${norm(origin.chain, origin.token)}:${dest.chain}:${norm(dest.chain, dest.token)}`
+    const r = refund && !refundsToSender(refund) ? `:r:${norm(origin.chain, refund)}` : ''
+    return `da:${addrKey(recipient)}:${origin.chain}:${norm(origin.chain, origin.token)}:${dest.chain}:${norm(dest.chain, dest.token)}${r}`
   }
 
   /**
@@ -32,8 +37,9 @@ export function depositAddresses(rt: RelayRuntime, direct: DirectTransfer) {
    */
   async function depositQuote(
     ctx: Pick<AdapterContext, 'fetch' | 'store'> & Partial<Pick<AdapterContext, 'log'>>,
-    p: { origin: CryptoAsset; dest: CryptoAsset; recipient: string; amountBase: string },
+    p: { origin: CryptoAsset; dest: CryptoAsset; recipient: string; amountBase: string; refundTo?: string },
   ): Promise<{ q: RelayQuoteResponse; address: string; requestId?: string }> {
+    const refund = p.refundTo ?? refundTo(p.origin.chain)
     const q = await api<RelayQuoteResponse>(ctx, '/quote/v2', {
       // `user` must be an address of the origin chain's VM (e.g. EVM origin, Solana recipient)
       user: quoteUser(p.origin.chain, p.recipient),
@@ -42,11 +48,11 @@ export function depositAddresses(rt: RelayRuntime, direct: DirectTransfer) {
       amount: p.amountBase,
       tradeType: 'EXACT_INPUT',
       useDepositAddress: true,
-      refundTo: refundTo(p.origin.chain),
+      refundTo: refund,
     }).catch((e) => {
       throw toOpenRamp(e, ctx.log)
     })
-    const key = depositKey(p.recipient, p.origin, p.dest)
+    const key = depositKey(p.recipient, p.origin, p.dest, refund)
     const cached = await ctx.store.get<string>(key)
     const fresh = q.steps?.find((s) => s.depositAddress)?.depositAddress
     const address = cached ?? fresh
@@ -57,12 +63,18 @@ export function depositAddresses(rt: RelayRuntime, direct: DirectTransfer) {
   }
 
   /** Get this session's open deposit address for a route, creating it with a nominal quote when missing. */
-  async function openDepositAddress(ctx: Pick<AdapterContext, 'fetch' | 'shared' | 'store'>, origin: CryptoAsset, dest: CryptoAsset, recipient: string): Promise<string> {
+  async function openDepositAddress(
+    ctx: Pick<AdapterContext, 'fetch' | 'shared' | 'store'>,
+    origin: CryptoAsset,
+    dest: CryptoAsset,
+    recipient: string,
+    refund = refundTo(origin.chain),
+  ): Promise<string> {
     if (sameAsset(origin.chain, origin.token, dest.chain, dest.token)) return recipient
-    const cached = await ctx.store.get<string>(depositKey(recipient, origin, dest))
+    const cached = await ctx.store.get<string>(depositKey(recipient, origin, dest, refund))
     if (cached) return cached
     const decimals = await decimalsOf(ctx, origin)
-    const { address } = await depositQuote(ctx, { origin, dest, recipient, amountBase: toBaseUnits(nominalAmount(decimals), decimals) })
+    const { address } = await depositQuote(ctx, { origin, dest, recipient, amountBase: toBaseUnits(nominalAmount(decimals), decimals), refundTo: refund })
     return address
   }
 
@@ -166,7 +178,8 @@ export function depositAddresses(rt: RelayRuntime, direct: DirectTransfer) {
     let address = data.depositAddress as string | undefined
     if (!address) {
       const dest = cryptoAsset(input.quote.output, 'output')
-      address = await openDepositAddress(ctx, origin, dest, recipientOf(ctx, input.deliverTo))
+      const refund = typeof data.refundTo === 'string' ? data.refundTo : undefined
+      address = await openDepositAddress(ctx, origin, dest, recipientOf(ctx, input.deliverTo), refund)
     }
     // One ref per session and address: the server's ref index then maps one ref to one session.
     const ref = depositRef(ctx, address)
@@ -210,7 +223,9 @@ export function depositAddresses(rt: RelayRuntime, direct: DirectTransfer) {
           token: origin.token,
           symbol,
           address,
-          warning: `Send only ${symbol} on ${name}. Other tokens or chains may be lost.`,
+          warning: data.senderRefund
+            ? `Send only ${symbol} on ${name}. Other tokens or chains may be lost. If the deposit fails, the refund goes back to the address that sent it, and your exchange may not credit it. Connect a wallet to get refunds there.`
+            : `Send only ${symbol} on ${name}. Other tokens or chains may be lost.`,
         },
         transitions: [POLL_TRANSITION],
       },

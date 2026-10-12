@@ -37,7 +37,7 @@ export { erc20TransferData }
 export function relay(opts: RelayOptions = {}) {
   const rt = createRuntime(opts)
   const { warnNoKey, api, listRequests } = rt
-  const legs = relayLegs()
+  const legs = relayLegs(opts)
   const direct = directTransfer(rt)
   const deposits = depositAddresses(rt, direct)
   const { quoteWallet, quoteDeposit } = quotes(rt, deposits, legs)
@@ -86,7 +86,7 @@ export function relay(opts: RelayOptions = {}) {
       const dest = destAsset(ctx, input.leg.to.asset.kind === 'crypto' ? input.leg.to.asset : undefined)
       const recipient = recipientOf(ctx)
       warnNoKey(ctx.log)
-      const address = await openDepositAddress(ctx, origin, dest, recipient)
+      const address = await openDepositAddress(ctx, origin, dest, recipient, rt.refundTo(origin.chain, { recipient }))
       // Remember when this session first used the address, so status ignores older deposits.
       const ref = depositRef(ctx, address)
       const key = `d:${addrKey(ref)}`

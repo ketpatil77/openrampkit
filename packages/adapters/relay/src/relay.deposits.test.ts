@@ -305,3 +305,79 @@ describe('relay: deposit-address sessions to the same recipient', () => {
     expect(log.warnings.filter((w) => w.includes('2026-11-24'))).toHaveLength(1)
   })
 })
+
+describe('relay: refund address of open deposit addresses', () => {
+  const ZERO = '0x0000000000000000000000000000000000000000'
+  const WALLET = '0x00000000000000000000000000000000000a11ce'
+  const exchangeLeg: PathwayLeg = { ...transferLeg, method: 'exchange_transfer' }
+  function setup(opts: Parameters<typeof relay>[0] = {}) {
+    let n = 0
+    const { fetch, calls } = fakeFetch([
+      {
+        method: 'POST',
+        match: '/quote/v2',
+        reply: (c) => {
+          const amount = String((c.body as { amount: string }).amount)
+          const address = `0x${String(++n).padStart(40, '0')}`
+          return {
+            requestId: `0xq${n}`,
+            steps: [{ id: 'deposit', kind: 'transaction', depositAddress: address, items: [] }],
+            details: { currencyIn: { currency: usdc(42161, ARB_USDC.token), amount }, currencyOut: { currency: usdc(8453, BASE_USDC.token), amount } },
+          }
+        },
+      },
+    ])
+    const a = relay({ apiKey: 'k', ...opts })
+    const ctx = makeCtx({ fetch, session: { id: 'sess_r' } })
+    const run = async (leg: PathwayLeg, wallet?: string) => {
+      const source = { chain: ARB_USDC.chain, token: ARB_USDC.token, ...(wallet ? { address: wallet } : {}) }
+      const q = await a.quote({ leg, amountIn: { value: '10', asset: ARB_USDC }, source }, ctx)
+      const step = await a.start({ leg, quote: q, source }, ctx)
+      return { body: calls.at(-1)!.body as { refundTo: string }, surface: step.action?.surface as { address: string; warning: string } }
+    }
+    return { a, run }
+  }
+
+  it('the transfer method refunds to the sender, as before', async () => {
+    const { run } = setup()
+    const r = await run(transferLeg, WALLET)
+    expect(r.body.refundTo).toBe(ZERO)
+    expect(r.surface.warning).not.toMatch(/refund/)
+  })
+
+  it('from an exchange: refunds to the connected wallet, never to the exchange hot wallet', async () => {
+    const { run } = setup({ exchangeTransfer: true })
+    const r = await run(exchangeLeg, WALLET)
+    expect(r.body.refundTo).toBe(WALLET)
+    expect(r.surface.warning).not.toMatch(/refund/)
+  })
+
+  it('from an exchange with no wallet and no refund address: refunds to the sender and warns the user', async () => {
+    const { run } = setup({ exchangeTransfer: true })
+    const r = await run(exchangeLeg)
+    expect(r.body.refundTo).toBe(ZERO)
+    expect(r.surface.warning).toMatch(/refund goes back to the address that sent it/)
+  })
+
+  it("refundTo 'recipient' refunds to the destination address; an explicit address wins over the wallet", async () => {
+    expect((await setup({ refundTo: 'recipient' }).run(transferLeg)).body.refundTo).toBe(DEST)
+    expect((await setup({ refundTo: 'recipient', exchangeTransfer: true }).run(exchangeLeg)).body.refundTo).toBe(DEST)
+    const OPS = '0x00000000000000000000000000000000000000f5'
+    expect((await setup({ refundTo: OPS, exchangeTransfer: true }).run(exchangeLeg, WALLET)).body.refundTo).toBe(OPS)
+  })
+
+  it('an address that refunds to the sender is never reused for an exchange deposit in the same session', async () => {
+    const { run } = setup({ exchangeTransfer: true })
+    const t = await run(transferLeg, WALLET)
+    const e = await run(exchangeLeg, WALLET)
+    expect(e.surface.address).not.toBe(t.surface.address)
+    // The same method again keeps its own address.
+    expect((await run(exchangeLeg, WALLET)).surface.address).toBe(e.surface.address)
+    expect((await run(transferLeg, WALLET)).surface.address).toBe(t.surface.address)
+  })
+
+  it('offers exchange_transfer on the transfer leg only with exchangeTransfer', () => {
+    expect(relay().legs.find((l) => l.id === 'transfer')!.methods).toEqual(['transfer'])
+    expect(relay({ exchangeTransfer: true }).legs.find((l) => l.id === 'transfer')!.methods).toEqual(['transfer', 'exchange_transfer'])
+  })
+})

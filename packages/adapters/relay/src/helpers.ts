@@ -52,6 +52,11 @@ export function fitsChain(chain: string, address: string | undefined): address i
   return isSolana(chain) ? isSolanaAddress(address) : /^0x[0-9a-fA-F]{40}$/.test(address)
 }
 
+/** True when a `refundTo` value means "refund to the sender" (the origin chain's native-currency address) */
+export function refundsToSender(refundTo: string): boolean {
+  return refundTo === EVM_NATIVE || refundTo === SOLANA_NATIVE
+}
+
 /** The `user` for a Relay quote: the given address when it fits the origin chain, else a placeholder */
 export function quoteUser(originChain: string, address: string | undefined): string {
   if (fitsChain(originChain, address)) return address

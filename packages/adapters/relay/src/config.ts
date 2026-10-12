@@ -17,9 +17,21 @@ export type RelayOptions = {
   /**
    * Where Relay refunds failed deposit-address requests.
    * 'origin' (default) sends the origin chain's native-currency address, which turns on
-   * automatic refund to the original sender. Or pass an explicit address.
+   * automatic refund to the original sender. 'recipient' refunds to the session's destination
+   * address when it is an address of the origin chain's VM; use it only when that address is the
+   * user's own wallet on every chain (an EOA). Or pass an explicit address.
+   *
+   * The `exchange_transfer` leg never refunds to the sender by choice: the sender is the exchange's
+   * hot wallet, which may not credit the refund. It uses an explicit address, then the connected
+   * wallet, then the recipient (with 'recipient'). With none of these, it refunds to the sender
+   * and the deposit screen warns the user.
    */
-  refundTo?: 'origin' | string
+  refundTo?: 'origin' | 'recipient' | string
+  /**
+   * Also offer the `transfer` leg as the `exchange_transfer` method ("From an exchange"). Default false.
+   * The same Relay open deposit address, with exchange copy and a safe refund address (see `refundTo`).
+   */
+  exchangeTransfer?: boolean
   /**
    * JSON-RPC URLs per CAIP-2 chain, used to verify same-chain, same-token moves on chain
    * (Relay is not involved there). EVM chains use `eth_*` methods, Solana uses

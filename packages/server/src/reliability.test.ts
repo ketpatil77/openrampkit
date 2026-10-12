@@ -21,6 +21,8 @@ type Sent = { type: string; id: string; header: string; sessionId: string; ok: b
 function hookedAdapter() {
   let n = 0
   const statusOf: Record<string, LegStatus> = {}
+  const canceled: string[] = []
+  const cancelFails = { on: false }
   const spec: LegSpec = {
     id: 'hook', kind: 'fiat_onramp', methods: ['card'],
     from: { asset: { kind: 'fiat', currencies: '*' }, location: ['user_account'] },
@@ -41,6 +43,10 @@ function hookedAdapter() {
       const status = statusOf[ref] ?? 'requires_action'
       return { status, ref, ...(status === 'requires_action' ? { action: { kind: 'payment' as const, transitions: poll } } : {}) }
     },
+    async cancel({ ref }) {
+      if (cancelFails.on) throw new Error('provider down')
+      canceled.push(ref)
+    },
     webhook: {
       async verify() {
         return true
@@ -50,7 +56,7 @@ function hookedAdapter() {
       },
     },
   })
-  return { adapter, statusOf }
+  return { adapter, statusOf, canceled, cancelFails }
 }
 
 /** App backend that records each webhook. `answer` decides the HTTP status (or waits). */
@@ -87,7 +93,7 @@ function make(extra: Partial<OpenRampConfig> = {}) {
     expect(pub.step.state).toBe('PAYMENT')
     return s
   }
-  return { ramp, call, post, hook, toPayment, app, statusOf: hooked.statusOf }
+  return { ramp, call, post, hook, toPayment, app, statusOf: hooked.statusOf, canceled: hooked.canceled, cancelFails: hooked.cancelFails }
 }
 
 /** A promise you open by hand, and a promise that resolves when the gate is reached. */
@@ -305,6 +311,43 @@ describe('transactions in the result', () => {
     await hook([{ ref: 'order-1', status: 'succeeded', transactions: [{ role: 'destination', hash: '0x1' }] }])
     const pub = await ramp.sessions.retrieve(s.id)
     expect(pub!.result!.transactions).toEqual([{ role: 'destination', chain: 'eip155:8453', hash: '0x1', legIndex: 0 }])
+  })
+})
+
+describe('restart does not let the user pay twice', () => {
+  it('asks the provider first: a payment that the provider already took blocks the restart', async () => {
+    const { toPayment, post, ramp, statusOf, canceled } = make()
+    const s = await toPayment()
+    statusOf['order-1'] = 'processing' // paid on the provider page; no webhook yet
+    const r = await post(`/sessions/${s.id}/transitions/restart`, s.clientSecret)
+    expect(r.status).toBe(409)
+    expect((await ramp.sessions.retrieve(s.id))!.status).toBe('processing')
+    expect(canceled).toEqual([])
+  })
+
+  it('a provider that already reports success also blocks it, and the session succeeds', async () => {
+    const { toPayment, post, ramp, statusOf } = make()
+    const s = await toPayment()
+    statusOf['order-1'] = 'succeeded'
+    expect((await post(`/sessions/${s.id}/transitions/restart`, s.clientSecret)).status).toBe(409)
+    expect((await ramp.sessions.retrieve(s.id))!.status).toBe('succeeded')
+  })
+
+  it('voids the left provider order when the adapter can cancel it', async () => {
+    const { toPayment, post, canceled } = make()
+    const s = await toPayment()
+    const r = await (await post(`/sessions/${s.id}/transitions/restart`, s.clientSecret)).json()
+    expect(r.step.state).toBe('SELECT_METHOD')
+    expect(canceled).toEqual(['order-1'])
+  })
+
+  it('a failed cancel does not block the restart; a late payment still applies', async () => {
+    const { toPayment, post, hook, ramp, cancelFails } = make()
+    const s = await toPayment()
+    cancelFails.on = true
+    expect((await post(`/sessions/${s.id}/transitions/restart`, s.clientSecret)).status).toBe(200)
+    expect((await hook([{ ref: 'order-1', status: 'succeeded' }])).status).toBe(200)
+    expect((await ramp.sessions.retrieve(s.id))!.status).toBe('succeeded')
   })
 })
 

@@ -5,13 +5,14 @@ import type { AdapterContext, QuoteInput } from '@openrampkit/adapter'
 import { OpenRampException, USDC, chainName, cmp, openRampError, toBaseUnits } from '@openrampkit/core'
 import type { CryptoAsset, LegQuote, LegSpec } from '@openrampkit/core'
 import type { RelayRuntime } from './client.js'
+import type { RelayOptions } from './config.js'
 import { HOP_CHAINS, SOLANA_CAIP2, WALLET_QUOTE_TTL_MIN } from './config.js'
 import type { DepositAddresses } from './deposit-address.js'
-import { cryptoAsset, destAsset, etaFrom, feesFrom, fmt, guaranteeOf, quoteUser, recipientOf, requestIdOf, sameAsset, settlementOf, toOpenRamp, withMeta } from './helpers.js'
+import { cryptoAsset, destAsset, etaFrom, feesFrom, fmt, guaranteeOf, quoteUser, recipientOf, refundsToSender, requestIdOf, sameAsset, settlementOf, toOpenRamp, withMeta } from './helpers.js'
 import type { RelayQuoteResponse } from './types.js'
 
 /** The leg specs, new for each adapter instance */
-export function relayLegs(): LegSpec[] {
+export function relayLegs(opts: Pick<RelayOptions, 'exchangeTransfer'> = {}): LegSpec[] {
   const usdcHops: Record<string, string[]> = Object.fromEntries(HOP_CHAINS.filter((c) => USDC[c]).map((c) => [c, [USDC[c]!]]))
 
   return [
@@ -31,7 +32,7 @@ export function relayLegs(): LegSpec[] {
     {
       id: 'transfer',
       kind: 'bridge_swap',
-      methods: ['transfer'],
+      methods: opts.exchangeTransfer ? ['transfer', 'exchange_transfer'] : ['transfer'],
       from: { asset: { kind: 'crypto', chains: '*' }, location: ['user_wallet'] },
       to: { asset: { kind: 'crypto', chains: '*' }, location: ['address'] },
       regions: { allow: ['*'], deny: [] },
@@ -52,7 +53,7 @@ export function relayLegs(): LegSpec[] {
 }
 
 export function quotes(rt: RelayRuntime, deposits: Pick<DepositAddresses, 'depositQuote' | 'nominalAmount'>, legs: LegSpec[]) {
-  const { api, decimalsOf, baseBody, slippageBps } = rt
+  const { api, decimalsOf, baseBody, slippageBps, refundTo } = rt
   const { depositQuote, nominalAmount } = deposits
 
   async function quoteWallet(input: QuoteInput, ctx: AdapterContext): Promise<LegQuote> {
@@ -155,7 +156,11 @@ export function quotes(rt: RelayRuntime, deposits: Pick<DepositAddresses, 'depos
 
     const nominal = cmp(given, '0') <= 0
     const amount = nominal ? nominalAmount(inDec) : given
-    const { q, address, requestId } = await depositQuote(ctx, { origin, dest, recipient, amountBase: toBaseUnits(amount, inDec) })
+    // From an exchange, a refund to the sender goes to the exchange's hot wallet: prefer the user's wallet.
+    const exchange = legId === 'transfer' && input.leg.method === 'exchange_transfer'
+    const refund = refundTo(origin.chain, { exchange, user: input.source?.address, recipient: ctx.destination.type === 'crypto' ? ctx.destination.address : undefined })
+    const senderRefund = exchange && refundsToSender(refund)
+    const { q, address, requestId } = await depositQuote(ctx, { origin, dest, recipient, amountBase: toBaseUnits(amount, inDec), refundTo: refund })
     const cin = q.details?.currencyIn
     const cout = q.details?.currencyOut
     if (!cin || !cout) throw new OpenRampException(openRampError('PROVIDER_UNAVAILABLE', { message: 'Relay returned an incomplete quote.' }), 502)
@@ -171,7 +176,7 @@ export function quotes(rt: RelayRuntime, deposits: Pick<DepositAddresses, 'depos
       guarantee: 'estimate',
       eta: etaFrom(q, spec.eta),
       expiresAt: quoteExpiresAt(),
-      data: { direct: false, depositAddress: address, requestId, anyAmount, nominal, recipient, ...(nominal ? {} : { amountBase: cin.amount }) },
+      data: { direct: false, depositAddress: address, requestId, anyAmount, nominal, recipient, refundTo: refund, ...(senderRefund ? { senderRefund } : {}), ...(nominal ? {} : { amountBase: cin.amount }) },
     }
   }
 

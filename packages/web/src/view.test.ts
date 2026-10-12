@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Snapshot } from '@openrampkit/client'
-import { USDC, openRampError } from '@openrampkit/core'
+import { SOLANA_MAINNET, USDC, openRampError } from '@openrampkit/core'
 import { METHODS, method, payment, plan, quote, session, step } from '../../client/src/testctx.js'
 import { en } from './messages.js'
 import {
@@ -207,6 +207,8 @@ describe('transfer source picker', () => {
     ])
     expect(transferTokens('eip155:143')).toEqual([{ token: 'native', symbol: 'MON', decimals: 18 }])
     expect(transferTokens('eip155:777')).toEqual([{ token: 'native', symbol: 'ETH', decimals: 18 }])
+    // SOL has 9 decimals, not 18
+    expect(transferTokens(SOLANA_MAINNET).find((o) => o.token === 'native')).toEqual({ token: 'native', symbol: 'SOL', decimals: 9 })
   })
 
   it('sourceForChain keeps native, else picks the first token', () => {

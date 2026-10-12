@@ -1,7 +1,7 @@
 // HTTP routes. Every route takes the runtime and returns a Response; errors are thrown as OpenRampException.
 
 import { claimWebhook, releaseWebhook } from '@openrampkit/adapter'
-import { OpenRampException, isFinalStatus, isTerminal, openRampError } from '@openrampkit/core'
+import { OpenRampException, isFinalStatus, isLegTerminal, isTerminal, openRampError } from '@openrampkit/core'
 import type { SurfaceKind } from '@openrampkit/core'
 import { safeEqual, sha256Hex } from './crypto.js'
 import { MAX_WEBHOOK_BODY_BYTES } from './config.js'
@@ -246,6 +246,12 @@ async function transitionRoute(rt: Runtime, req: Request, rec: SessionRecord, na
     // Allowed when no payment is in progress (also after a failed attempt), or while the user still has
     // to pay (PAYMENT). Never after a final status: `session.failed` is never followed by success.
     if (isFinalStatus(rec.status)) return errorResponse(openRampError('BAD_REQUEST', { message: finalMessage(rec) }), 409)
+    // The user may have paid on a provider page (or by QR code or bank transfer) before the provider told
+    // us. Ask the provider once, so that a payment it already knows about blocks the restart.
+    if (rec.status !== 'requires_payment_method' && rec.step.state === 'PAYMENT' && (await refreshActive(rt, rec, true))) {
+      await saveSession(rt, rec)
+      if (isFinalStatus(rec.status)) return errorResponse(openRampError('BAD_REQUEST', { message: finalMessage(rec) }), 409)
+    }
     if (rec.status !== 'requires_payment_method' && rec.step.state !== 'PAYMENT') {
       return errorResponse(openRampError('BAD_REQUEST', { message: 'This payment can no longer be changed.' }), 409)
     }
@@ -254,6 +260,9 @@ async function transitionRoute(rt: Runtime, req: Request, rec: SessionRecord, na
     if (rec.status !== 'requires_payment_method' && rec.active && moneyMayHaveMoved(rec.active)) {
       return errorResponse(openRampError('BAD_REQUEST', { message: 'Money of this payment may be on its way. It cannot be changed now.' }), 409)
     }
+    // Void the provider order of the left payment when the adapter can, so the user cannot also pay it
+    // later. Best effort: a payment that still arrives takes the late payment path.
+    await cancelLeftLeg(rt, rec)
     // Keep the left payment as an earlier attempt: the user may have paid it already (a bank transfer,
     // a QR code or a deposit address). A late provider event for it still applies (see `applyEvent`).
     archiveActive(rec)
@@ -285,6 +294,21 @@ async function transitionRoute(rt: Runtime, req: Request, rec: SessionRecord, na
   await setLegStep(rt, rec, act.index, ls)
   await saveSession(rt, rec)
   return json(publicSession(rec))
+}
+
+/** Ask the adapter to void the open provider order of the active leg (on `restart`). Never throws. */
+async function cancelLeftLeg(rt: Runtime, rec: SessionRecord): Promise<void> {
+  const act = rec.active
+  const leg = act?.legs[act.index]
+  if (!act || !leg?.ref || !leg.step || isLegTerminal(leg.step.status)) return
+  const a = rt.adapters.get(leg.adapterId)
+  if (!a?.cancel) return
+  try {
+    await a.cancel({ leg: act.pathway.legs[act.index]!, ref: leg.ref }, adapterContext(rt, rec, a, act.pathway, act.index))
+    addTimeline(rec, 'payment.provider_canceled', { adapterId: a.id })
+  } catch (e) {
+    rt.log.warn('adapter cancel on restart failed; the attempt stays open for a late payment', { sessionId: rec.id, adapter: a.id, error: e instanceof Error ? e.message : String(e) })
+  }
 }
 
 /** GET /start/:sessionId.token.sig: verify the signed token, then 302 to the provider. */

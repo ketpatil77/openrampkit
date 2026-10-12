@@ -206,7 +206,7 @@ export function transferChains(sourceChain: string | undefined): string[] {
 export function transferTokens(chain: string): TokenOption[] {
   return [
     ...(USDC[chain] ? [{ token: USDC[chain]!, symbol: 'USDC', decimals: 6 }] : []),
-    { token: 'native', symbol: CHAINS[chain]?.nativeSymbol ?? 'ETH', decimals: 18 },
+    { token: 'native', symbol: CHAINS[chain]?.nativeSymbol ?? 'ETH', decimals: CHAINS[chain]?.nativeDecimals ?? 18 },
   ]
 }
 

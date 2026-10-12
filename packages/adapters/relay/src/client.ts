@@ -6,7 +6,7 @@ import { OpenRampException, chainName, openRampError } from '@openrampkit/core'
 import type { CryptoAsset } from '@openrampkit/core'
 import { DEFAULT_LOG_BLOCK_RANGE, DEFAULT_RPC_URLS, DEFAULT_TOLERANCE_BPS, EVM_NATIVE, SOLANA_NATIVE } from './config.js'
 import type { RelayOptions } from './config.js'
-import { isSolana, knownDecimals, relayChainId, relayCurrency, toOpenRamp } from './helpers.js'
+import { fitsChain, isSolana, knownDecimals, relayChainId, relayCurrency, toOpenRamp } from './helpers.js'
 import type { SolTx } from './solana.js'
 import type { RelayRequest } from './types.js'
 
@@ -79,8 +79,16 @@ export function createRuntime(opts: RelayOptions) {
     )
   }
 
-  function refundTo(originChain: string): string {
-    if (opts.refundTo && opts.refundTo !== 'origin') return opts.refundTo
+  /**
+   * The `refundTo` of a deposit-address quote (see `RelayOptions.refundTo`). `exchange`: the sender is an
+   * exchange, so the connected wallet (`user`) comes before the sender. `recipient`: the session's
+   * destination address. The native-currency address means "the sender" (see `refundsToSender`).
+   */
+  function refundTo(originChain: string, p: { exchange?: boolean; user?: string; recipient?: string } = {}): string {
+    const r = opts.refundTo
+    if (r && r !== 'origin' && r !== 'recipient') return r
+    if (p.exchange && fitsChain(originChain, p.user)) return p.user
+    if (r === 'recipient' && fitsChain(originChain, p.recipient)) return p.recipient
     return isSolana(originChain) ? SOLANA_NATIVE : EVM_NATIVE
   }
 
